@@ -152,6 +152,25 @@ class TrustedAggregatingExecutorTest(parameterized.TestCase):
     result = _run_test_comp_produces_aggr_value(self, comp, num_clients=3)
     self.assertEqual(result.numpy(), 30)
 
+  def test_federated_zip_secure_client_values(self):
+    @computations.tf_computation(tf.int32, tf.int32)
+    def add_numbers(x, y):
+      return x + y
+
+    @computations.tf_computation(tf.int32, tf.int32)
+    def encrypt_tensor(x, y):
+      return tf.add(x, y)
+
+    @computations.federated_computation
+    def comp():
+      return intrinsics.federated_reduce(
+        intrinsics.federated_map(encrypt_tensor,
+          intrinsics.federated_value((10, 10), placements.CLIENTS)), 
+          0, add_numbers)
+
+    result = _run_test_comp_produces_aggr_value(self, comp, num_clients=3)
+    self.assertEqual(result.numpy(), 60)
+
 
 if __name__ == '__main__':
   absltest.main()

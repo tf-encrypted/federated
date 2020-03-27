@@ -473,6 +473,10 @@ class FederatingExecutor(executor_base.Executor):
           'Cannot map a non-all_equal argument into an all_equal result.')
     fn = arg.internal_representation[0]
     val = arg.internal_representation[1]
+
+    if isinstance(val[0], FederatingExecutorValue):
+      val = val[0].internal_representation
+
     py_typecheck.check_type(fn, pb.Computation)
     py_typecheck.check_type(val, list)
     for v in val:
