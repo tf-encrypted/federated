@@ -133,6 +133,22 @@ py_library(
         "//tensorflow_federated/python/core/impl/executors:federating_executor",
         "//tensorflow_federated/python/core/impl/executors:reference_resolving_executor",
         "//tensorflow_federated/python/core/impl/executors:remote_executor",
+        "//tensorflow_federated/python/core/impl/executors:sizing_executor",
+        "//tensorflow_federated/python/core/impl/executors:thread_delegating_executor",
+        "//tensorflow_federated/python/core/impl/executors:transforming_executor",
+    ],
+)
+
+py_test(
+    name = "execution_tracing_test",
+    size = "small",
+    srcs = ["execution_tracing_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    deps = [
+        ":execution_tracing",
+        "//tensorflow_federated/python/common_libs:test",
+        "//tensorflow_federated/python/common_libs:tracing",
     ],
 )
 
