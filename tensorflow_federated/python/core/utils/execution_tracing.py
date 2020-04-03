@@ -1,5 +1,8 @@
+import asyncio
+import contextlib
 from enum import Enum
 import functools
+import inspect
 import logging
 import re
 
@@ -17,6 +20,9 @@ from tensorflow_federated.python.core.impl.executors import eager_tf_executor
 from tensorflow_federated.python.core.impl.executors import federating_executor
 from tensorflow_federated.python.core.impl.executors import reference_resolving_executor
 from tensorflow_federated.python.core.impl.executors import remote_executor
+from tensorflow_federated.python.core.impl.executors import sizing_executor
+from tensorflow_federated.python.core.impl.executors import thread_delegating_executor
+from tensorflow_federated.python.core.impl.executors import transforming_executor
 
 
 class TraceFilterMode(Enum):
@@ -31,7 +37,7 @@ def pattern_union(*patterns):
 
 
 _VALUE_PATTERN = re.compile('^create_([a-z]+)$')
-_INTRINSIC_PATTERN = re.compile('^_compute_intrinsic_([a-z]+)$')
+_INTRINSIC_PATTERN = re.compile('^_compute_intrinsic_([a-z_]+)$')
 
 _TRACE_FILTER_PATTERNS = {
     TraceFilterMode.VALUES: _VALUE_PATTERN,
@@ -61,11 +67,12 @@ class ExecutionTracingProvider(tracing.TracingProvider):
 
     # fill in formatting strategies
     self._default_strategy = default_format_strategy
-    self._formatting_strategies = self._generate_formatting_strategies()
+    self._formatting_strategies = dict()
+    self._make_formatting_strategies()
 
     # indentation management
-    self._current_call_level = 0
-
+    # start at -1 so the first call prints at 0
+    self._current_call_level = -1
 
   def trace(self, fn=None, **kwargs):
     """Decorate a method with tracing.
@@ -89,15 +96,14 @@ class ExecutionTracingProvider(tracing.TracingProvider):
     if not self._is_traceable(method_name, regex, override=force_trace):
       return fn
 
-    logging.debug('Decorating sync method: %s.%s', class_name, method_name)
-
     def _pre_fn(*args, **kwargs):
-      self._trace_method(fn, "call")(*args, **kwargs)
       self._current_call_level += 1
+      self._trace_method(fn, class_name, method_name, "call")(*args, **kwargs)
 
     def _post_fn(*args, **kwargs):
-      self._trace_method(fn, "retr")(*args, **kwargs)
+      self._trace_method(fn, class_name, method_name, "retr")(*args, **kwargs)
       self._current_call_level -= 1
+
 
     if inspect.iscoroutinefunction(fn):
 
@@ -161,16 +167,28 @@ class ExecutionTracingProvider(tracing.TracingProvider):
   def _is_traceable(cls, method_name, regex, override=False):
     if override:
       return True
-    return regex.search(method_name)
+    match = regex.search(method_name)
+    if match is None:
+      return False
+    return True
 
-  def _trace_method(self, fn, call_or_retr):
-    ctx = getattr(fn, '__self__', None)
+  def _trace_method(self, fn, class_name, method_name, call_or_retr):
+    # a dirty hack -- Python can't distinguish that fn is a method here
+    fn_sig = inspect.signature(fn)
+    has_self = 'self' in fn_sig.parameters
 
     def _log_fn(*args, **kwargs):
+      nonlocal has_self
+
+      ctx = None
+      if has_self:
+        ctx = args[0]
+        args = args[1:]
+
       prefix_str = self._prefix(ctx, class_name)
       main_str = "{m} {c}".format(m=method_name, c=call_or_retr)
-      suffix_args = " ".join(self.format_object(a) for a in args)
-      suffix_kwargs = " ".join(self.format_object(v) for k,v in kwargs.items())
+      suffix_args = " ".join(self._format_object(a) for a in args)
+      suffix_kwargs = " ".join(self._format_object(v) for k,v in kwargs.items())
       logging.debug("{p} {m} {sa} {sk}".format(
           p=prefix_str,
           m=main_str,
@@ -182,6 +200,7 @@ class ExecutionTracingProvider(tracing.TracingProvider):
   def _prefix(self, ctx, type_):
     indentation = '  ' * self._current_call_level
     template = "{indentation}{type} {hash}"
+
     if ctx is None:
       return template.format(indentation=indentation, type=type_, hash="NO_ID")
     return template.format(indentation=indentation, type=type_, hash=hash(ctx))
@@ -195,27 +214,42 @@ class ExecutionTracingProvider(tracing.TracingProvider):
     values = tup._element_array
     fmt_strs = []
     for n, v in zip(names, values):
-      fmt_strs.append("{}: {}".format(n, self.format_object(v)))
+      fmt_strs.append("{}: {}".format(n, self._format_object(v)))
     return "({})".format(", ".join(fmt_strs))
 
-  #
-  # Registration of built-in types
-  #
   def _register_formatting_strategy(self, type_, formatting_strategy):
     self._formatting_strategies[type_] = formatting_strategy
 
-  def _generate_formatting_strategies(self):
+  # Register all types here
+  def _make_formatting_strategies(self):
+    self.register_executors()
     self.register_executor_values()
     self.register_computations()
     self.register_computation_types()
     self.register_primitives()
 
+  def register_executors(self):
+    register = self._register_formatting_strategy
+
+    for type_ in [
+        caching_executor.CachingExecutor,
+        composing_executor.ComposingExecutor,
+        eager_tf_executor.EagerTFExecutor,
+        federating_executor.FederatingExecutor,
+        reference_resolving_executor.ReferenceResolvingExecutor,
+        remote_executor.RemoteExecutor,
+        sizing_executor.SizingExecutor,
+        thread_delegating_executor.ThreadDelegatingExecutor,
+        transforming_executor.TransformingExecutor,
+    ]:
+      register(type_, lambda x: "<{} @{}>".format(type_.__name__, id(x)))
+  
   def register_executor_values(self):
     register = self._register_formatting_strategy
 
     for type_ in [
-        caching_executor.CachingExecutorValue,
-        composing_executor.ComposingExecutorValue,
+        caching_executor.CachedValue,
+        composing_executor.CompositeValue,
         eager_tf_executor.EagerValue,
         federating_executor.FederatingExecutorValue,
         reference_resolving_executor.ReferenceResolvingExecutorValue,
@@ -241,8 +275,10 @@ class ExecutionTracingProvider(tracing.TracingProvider):
     register(float, lambda x: "<{} : float>".format(x))
     register(int, lambda x: "<{} : int>".format(x))
     register(type(None), lambda _: "-")
-    register(list, lambda x: [self.format_object(xi) for xi in x])
-    register(tuple, lambda x: tuple(self.format_object(xi) for xi in x))
+    register(list,
+        lambda x: "<"+", ".join([self._format_object(xi) for xi in x])+">")
+    register(tuple,
+        lambda x: "<"+", ".join(tuple(self._format_object(xi) for xi in x))+">")
 
     register(tf_EagerTensor,
         lambda x: "<{} @{}>".format(tf_EagerTensor.__name__, id(x)))
