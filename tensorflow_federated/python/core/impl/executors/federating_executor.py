@@ -119,6 +119,20 @@ class FederatingExecutorValue(executor_value_base.ExecutorValue):
 
 class IntrinsicStrategy(abc.ABC):
 
+  def __init__(self, federating_executor: FederatingExecutor):
+    self.federating_executor = federating_executor
+
+  @classmethod
+  @abc.abstractmethod
+  def validate_executor_placements(cls, executor_placements):
+    pass
+
+  def _get_child_executors(self, placement, index=None):
+    child_executors = self.federating_executor._target_executors[placement]
+    if index is not None:
+      return child_executors[index]
+    return child_executors
+
   @classmethod
   def _check_arg_is_anonymous_tuple(cls, arg):
     py_typecheck.check_type(arg.type_signature,
@@ -129,7 +143,7 @@ class IntrinsicStrategy(abc.ABC):
   @tracing.trace
   async def _place(self, arg, placement):
     py_typecheck.check_type(placement, placement_literals.PlacementLiteral)
-    children = self.executor._target_executors[placement]
+    children = self._get_child_executors(placement)
     val = await arg.compute()
     return FederatingExecutorValue(
         await asyncio.gather(
@@ -145,7 +159,7 @@ class IntrinsicStrategy(abc.ABC):
     py_typecheck.check_type(placement, placement_literals.PlacementLiteral)
     fn = arg.internal_representation
     fn_type = arg.type_signature
-    children = self.executor._target_executors[placement]
+    children = self._get_child_executors(placement)
 
     async def call(child):
       return await child.create_call(await child.create_value(fn, fn_type))
@@ -175,7 +189,7 @@ class IntrinsicStrategy(abc.ABC):
     py_typecheck.check_type(val, list)
     for v in val:
       py_typecheck.check_type(v, executor_value_base.ExecutorValue)
-    children = self.executor._target_executors[val_type.placement]
+    children = self._get_child_executors(val_type.placement)
     fns = await asyncio.gather(*[c.create_value(fn, fn_type) for c in children])
     results = await asyncio.gather(*[
         c.create_call(f, v) for c, (f, v) in zip(children, list(zip(fns, val)))
@@ -189,7 +203,8 @@ class IntrinsicStrategy(abc.ABC):
   async def _zip(self, arg, placement, all_equal):
     self._check_arg_is_anonymous_tuple(arg)
     py_typecheck.check_type(placement, placement_literals.PlacementLiteral)
-    cardinality = len(self.executor._target_executors[placement])
+    children = self._get_child_executors(placement)
+    cardinality = len(children)
     elements = anonymous_tuple.to_elements(arg.internal_representation)
     for _, v in elements:
       py_typecheck.check_type(v, list)
@@ -200,7 +215,6 @@ class IntrinsicStrategy(abc.ABC):
     for idx in range(cardinality):
       new_vals.append(
           anonymous_tuple.AnonymousTuple([(k, v[idx]) for k, v in elements]))
-    children = self.executor._target_executors[placement]
     new_vals = await asyncio.gather(
         *[c.create_tuple(x) for c, x in zip(children, new_vals)])
     return FederatingExecutorValue(
@@ -215,8 +229,28 @@ class IntrinsicStrategy(abc.ABC):
 
 class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
-  def __init__(self, parent_executor):
-    self.executor = parent_executor
+  def __init__(self, federating_executor):
+    super().__init__(federating_executor)
+
+  @classmethod
+  def validate_executor_placements(cls, executor_placements):
+    py_typecheck.check_type(executor_placements, dict)
+    for k, v in executor_placements.items():
+      if k is not None:
+        py_typecheck.check_type(k, placement_literals.PlacementLiteral)
+      py_typecheck.check_type(v, (list, executor_base.Executor))
+      if isinstance(v, list):
+        for e in v:
+          py_typecheck.check_type(e, executor_base.Executor)
+      for pl in [None, placement_literals.SERVER]:
+        if pl in executor_placements:
+          ex = executor_placements[pl]
+          if isinstance(ex, list):
+            pl_cardinality = len(ex)
+            if pl_cardinality != 1:
+              raise ValueError(
+                  'Unsupported cardinality for placement "{}": {}.'.format(
+                      pl, pl_cardinality))
 
   async def federated_value_at_server(self, arg):
     return await executor_utils.compute_intrinsic_federated_value(
@@ -273,7 +307,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
     val = arg.internal_representation[0]
     py_typecheck.check_type(val, list)
-    child = self.executor._target_executors[placement_literals.SERVER][0]
+    child = self._get_child_executors(placement_literals.SERVER, index=0)
 
     async def _move(v):
       return await child.create_value(await v.compute(), item_type)
@@ -281,8 +315,8 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     items = await asyncio.gather(*[_move(v) for v in val])
 
     zero = await child.create_value(
-        await (await self.executor.create_selection(arg, index=1)).compute(),
-        zero_type)
+        await (await self.federating_executor.create_selection(
+            arg, index=1)).compute(), zero_type)
     op = await child.create_value(arg.internal_representation[2], op_type)
 
     result = zero
@@ -311,11 +345,12 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
     # TODO(b/134543154): Expand this implementation to take advantage of the
     # parallelism afforded by `merge`.
+    fed_ex = self.federating_executor
 
     val = arg.internal_representation[0]
     zero = arg.internal_representation[1]
     accumulate = arg.internal_representation[2]
-    pre_report = await self.executor._compute_intrinsic_federated_reduce(
+    pre_report = await fed_ex._compute_intrinsic_federated_reduce(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([(None, val), (None, zero),
                                             (None, accumulate)]),
@@ -328,7 +363,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
                                       report_type.parameter)
 
     report = arg.internal_representation[4]
-    return await self.executor._compute_intrinsic_federated_apply(
+    return await fed_ex._compute_intrinsic_federated_apply(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([
                 (None, report), (None, pre_report.internal_representation)
@@ -341,11 +376,15 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     zero, plus = tuple(await
                        asyncio.gather(*[
                            executor_utils.embed_tf_scalar_constant(
-                               self.executor, arg.type_signature.member, 0),
+                               self.federating_executor,
+                               arg.type_signature.member,
+                               0),
                            executor_utils.embed_tf_binary_operator(
-                               self.executor, arg.type_signature.member, tf.add)
+                               self.federating_executor,
+                               arg.type_signature.member,
+                               tf.add)
                        ]))
-    return await self.executor._compute_intrinsic_federated_reduce(
+    return await self.federating_executor._compute_intrinsic_federated_reduce(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([
                 (None, arg.internal_representation),
@@ -357,12 +396,12 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     )
 
   async def federated_mean(self, arg):
-    arg_sum = await self.executor._compute_intrinsic_federated_sum(arg)
+    arg_sum = await self.federating_executor._compute_intrinsic_federated_sum(arg)
     member_type = arg_sum.type_signature.member
     count = float(len(arg.internal_representation))
     if count < 1.0:
       raise RuntimeError('Cannot compute a federated mean over an empty group.')
-    child = self.executor._target_executors[placement_literals.SERVER][0]
+    child = self._get_child_executors(placement_literals.SERVER, index=0)
     factor, multiply = tuple(await asyncio.gather(*[
         executor_utils.embed_tf_scalar_constant(child, member_type,
                                                 float(1.0 / count)),
@@ -377,7 +416,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
   async def federated_weighted_mean(self, arg):
     return await executor_utils.compute_federated_weighted_mean(
-        self.executor, arg)
+        self.federating_executor, arg)
 
   async def federated_collect(self, arg):
     py_typecheck.check_type(arg.type_signature, computation_types.FederatedType)
@@ -386,7 +425,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     val = arg.internal_representation
     py_typecheck.check_type(val, list)
     member_type = arg.type_signature.member
-    child = self.executor._target_executors[placement_literals.SERVER][0]
+    child = self._get_child_executors(placement_literals.SERVER, index=0)
     collected_items = await child.create_value(
         await asyncio.gather(*[v.compute() for v in val]),
         computation_types.SequenceType(member_type))
@@ -445,7 +484,7 @@ class FederatingExecutor(executor_base.Executor):
   # TODO(b/134543154): Implement the commonly used aggregation intrinsics so we
   # can begin to use this executor in integration tests.
 
-  def __init__(self, target_executors):
+  def __init__(self, target_executors, intrinsic_strategy_fn=CentralizedIntrinsicStrategy):
     """Creates a federated executor backed by a collection of target executors.
 
     Args:
@@ -456,29 +495,26 @@ class FederatingExecutor(executor_base.Executor):
         there only is a single participant associated with that placement, as
         would typically be the case with `tff.SERVER`) or lists of target
         executors.
+      intrinsic_strategy_fn: A callable mapping the current executor instance to
+        an instantiation of an IntrinsicStrategy implementation.
 
     Raises:
-      ValueError: If the value is unrecognized (e.g., a nonexistent intrinsic).
+      ValueError: If the target_executors are improper for the given
+        intrinsic_strategy_fn.
     """
-    py_typecheck.check_type(target_executors, dict)
+    py_typecheck.check_callable(intrinsic_strategy_fn)
+    intrinsic_strategy = intrinsic_strategy_fn(self)
+    py_typecheck.check_type(intrinsic_strategy, IntrinsicStrategy)
+    intrinsic_strategy.validate_executor_placements(target_executors)
+    self.intrinsic_strategy = intrinsic_strategy
+
     self._target_executors = {}
     for k, v in target_executors.items():
-      if k is not None:
-        py_typecheck.check_type(k, placement_literals.PlacementLiteral)
-      py_typecheck.check_type(v, (list, executor_base.Executor))
+      # v is either an Executor or a list of Executors
       if isinstance(v, executor_base.Executor):
         self._target_executors[k] = [v]
       else:
-        for e in v:
-          py_typecheck.check_type(e, executor_base.Executor)
         self._target_executors[k] = v.copy()
-    for pl in [None, placement_literals.SERVER]:
-      if pl in self._target_executors:
-        pl_cardinality = len(self._target_executors[pl])
-        if pl_cardinality != 1:
-          raise ValueError(
-              'Unsupported cardinality for placement "{}": {}.'.format(
-                  pl, pl_cardinality))
 
   def close(self):
     for p, v in self._target_executors.items():
