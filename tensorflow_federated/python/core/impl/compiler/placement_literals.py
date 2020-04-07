@@ -70,6 +70,12 @@ SERVER = PlacementLiteral(
     default_all_equal=True,
     description='The single top-level central coordinator.')
 
+AGGREGATORS = PlacementLiteral(
+    'AGGREGATORS',
+    'aggregators',
+    default_all_equal=True,
+    description='One or more third-parties for aggregations.')
+
 
 def uri_to_placement_literal(uri):
   """Returns the placement literal that corresponds to the given URI.

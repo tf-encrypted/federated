@@ -21,3 +21,6 @@ CLIENTS = placement_literals.CLIENTS
 
 # The single top-level central coordinator, a TFF placement constant.
 SERVER = placement_literals.SERVER
+
+# One or more third-parties for aggregations, a TFF placement constant.
+AGGREGATORS = placement_literals.AGGREGATORS
