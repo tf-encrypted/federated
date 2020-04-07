@@ -42,19 +42,24 @@ def all_isinstance(objs: Iterable[Any], classinfo: Type[Any]) -> bool:
 
 
 def create_test_executor(
-    number_of_clients: int = 3) -> federating_executor.FederatingExecutor:
+    number_of_clients: int = 3,
+    intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy,
+) -> federating_executor.FederatingExecutor:
 
   def create_bottom_stack():
     executor = eager_tf_executor.EagerTFExecutor()
     return reference_resolving_executor.ReferenceResolvingExecutor(executor)
 
-  return federating_executor.FederatingExecutor({
+  target_executors = {
       placement_literals.SERVER: create_bottom_stack(),
       placement_literals.CLIENTS: [
           create_bottom_stack() for _ in range(number_of_clients)
       ],
-      None: create_bottom_stack()
-  })
+      None: create_bottom_stack(),
+  }
+
+  return federating_executor.FederatingExecutor(
+      target_executors, intrinsic_strategy_fn=intrinsic_strategy_fn)
 
 
 def get_named_parameters_for_supported_intrinsics() -> List[Tuple[str, Any]]:
@@ -937,6 +942,24 @@ class FederatingExecutorCreateSelectionTest(executor_test_utils.AsyncTestCase):
     source = self.run_sync(executor.create_value(value, type_signature))
     with self.assertRaises(ValueError):
       self.run_sync(executor.create_selection(source, index=0))
+
+class IntrinsicStrategyTest(parameterized.TestCase):
+
+  def test_improper_intrinsic_strategy_fn(self):
+    class MockIntrinsicStrategy:
+      def __init__(self, parent_executor): self.executor = parent_executor
+      @classmethod
+      def validate_target_executors(cls, target_executors): pass
+
+    with self.assertRaises(TypeError):
+      create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
+
+  def test_placement_validate_necessary(self):
+    class MockIntrinsicStrategy(federating_executor.IntrinsicStrategy):
+      def __init__(self, parent_executor): self.executor = parent_executor
+
+    with self.assertRaises(TypeError):
+      create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
 
 
 if __name__ == '__main__':
