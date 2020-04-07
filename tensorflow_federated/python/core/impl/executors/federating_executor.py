@@ -641,9 +641,6 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       raise RuntimeError('Cannot compute a federated mean over an empty group.')
     child = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
     factor, multiply = tuple(await asyncio.gather(*[
-        executor_utils.embed_tf_scalar_constant(child, member_type,
-                                                float(1.0 / count)),
-        executor_utils.embed_tf_binary_operator(child, member_type, tf.multiply)
     ]))
     multiply_arg = await child.create_tuple(
         anonymous_tuple.AnonymousTuple([(None,
