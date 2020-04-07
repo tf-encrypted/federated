@@ -46,17 +46,20 @@ tf.compat.v1.enable_v2_behavior()
 
 def create_test_executor(
     num_clients=1,
-    use_reference_resolving_executor=False
-) -> federating_executor.FederatingExecutor:
+    use_reference_resolving_executor=False,
+    intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy
+  ) -> federating_executor.FederatingExecutor:
   bottom_ex = eager_tf_executor.EagerTFExecutor()
   if use_reference_resolving_executor:
     bottom_ex = reference_resolving_executor.ReferenceResolvingExecutor(
         bottom_ex)
-  return federating_executor.FederatingExecutor({
+  target_executors = {
       placement_literals.SERVER: bottom_ex,
       placement_literals.CLIENTS: [bottom_ex] * num_clients,
-      None: bottom_ex
-  })
+      None: bottom_ex,
+  }
+  return federating_executor.FederatingExecutor(
+      target_executors, intrinsic_strategy_fn=intrinsic_strategy_fn)
 
 
 def create_test_executor_factory():
@@ -68,8 +71,11 @@ Runtime = Tuple[asyncio.AbstractEventLoop,
                 federating_executor.FederatingExecutor]
 
 
-def _make_test_runtime(num_clients=1,
-                       use_reference_resolving_executor=False) -> Runtime:
+def _make_test_runtime(
+    num_clients=1,
+    use_reference_resolving_executor=False,
+    intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy,
+) -> Runtime:
   """Creates a test runtime consisting of an event loop and test executor."""
   loop = asyncio.get_event_loop()
   ex = create_test_executor(
@@ -88,11 +94,13 @@ def _run_comp_with_runtime(comp, runtime: Runtime):
   return loop.run_until_complete(call_value())
 
 
-def _run_test_comp(comp, num_clients=1, use_reference_resolving_executor=False):
+def _run_test_comp(comp, num_clients=1, use_reference_resolving_executor=False,
+    intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy):
   """Runs a computation (unapplied TFF function) using a test runtime."""
   runtime = _make_test_runtime(
       num_clients=num_clients,
-      use_reference_resolving_executor=use_reference_resolving_executor)
+      use_reference_resolving_executor=use_reference_resolving_executor,
+      intrinsic_strategy_fn=intrinsic_strategy_fn)
   return _run_comp_with_runtime(comp, runtime)
 
 
@@ -101,6 +109,7 @@ def _run_test_comp_produces_federated_value(
     comp,
     num_clients=1,
     use_reference_resolving_executor=False,
+    intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy,
 ):
   """Runs a computation (unapplied TFF function) using a test runtime.
 
@@ -119,7 +128,8 @@ def _run_test_comp_produces_federated_value(
   """
   loop, ex = _make_test_runtime(
       num_clients=num_clients,
-      use_reference_resolving_executor=use_reference_resolving_executor)
+      use_reference_resolving_executor=use_reference_resolving_executor,
+      intrinsic_strategy_fn=intrinsic_strategy_fn)
   val = _run_comp_with_runtime(comp, (loop, ex))
   test_instance.assertIsInstance(val,
                                  federating_executor.FederatingExecutorValue)
@@ -131,11 +141,13 @@ def _produce_test_value(
     type_spec=None,
     num_clients=1,
     use_reference_resolving_executor=False,
+    intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy,
 ):
   """Produces a TFF value using a test runtime."""
   loop, ex = _make_test_runtime(
       num_clients=num_clients,
-      use_reference_resolving_executor=use_reference_resolving_executor)
+      use_reference_resolving_executor=use_reference_resolving_executor,
+      intrinsic_strategy_fn=intrinsic_strategy_fn)
   return loop.run_until_complete(ex.create_value(value, type_spec=type_spec))
 
 
@@ -1144,6 +1156,24 @@ class FederatingExecutorTest(parameterized.TestCase):
 
     result = _run_test_comp_produces_federated_value(self, bar, num_clients=5)
     self.assertEqual(result.numpy(), 50)
+
+class IntrinsicStrategyTest(parameterized.TestCase):
+
+  def test_improper_intrinsic_strategy_fn(self):
+    class MockIntrinsicStrategy:
+      def __init__(self, parent_executor): self.executor = parent_executor
+      @classmethod
+      def validate_target_executors(cls, target_executors): pass
+
+    with self.assertRaises(TypeError):
+      create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
+
+  def test_placement_validate_necessary(self):
+    class MockIntrinsicStrategy(federating_executor.IntrinsicStrategy):
+      def __init__(self, parent_executor): self.executor = parent_executor
+
+    with self.assertRaises(TypeError):
+      create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
 
 
 if __name__ == '__main__':
