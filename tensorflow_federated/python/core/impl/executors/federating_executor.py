@@ -577,27 +577,18 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                 (fn_type, val_type))))
 
   async def _decrypt_tensors_on_aggregator(self, val, clients_dtype):
+  
+    client_output_type_signature = val[0].type_signature[0]
+    aggregator_public_key_type_signature = val[0].type_signature[1]
 
-    clients_output_type_signature = val[0].type_signature[0]
-    ciphtertext_tensor_type = clients_output_type_signature[0]
-    mac_tensor_type = clients_output_type_signature[1]
-    pk_c_tensor_type = clients_output_type_signature[2]
-    nonce_tensor_type = clients_output_type_signature[3]
-    #sk_a_tensor_type = clients_output_type_signature[4]
-    # BUG  why sk_a_tensor_type is not the  5th element?
-    sk_a_tensor_type = computation_types.TensorType(tf.uint8, [32])
+    @computations.tf_computation(client_output_type_signature, 
+                                 aggregator_public_key_type_signature)
+    def decrypt_tensor(client_outputs, sk_a):
 
-    @computations.tf_computation(ciphtertext_tensor_type, 
-                                 mac_tensor_type, 
-                                 pk_c_tensor_type,
-                                 nonce_tensor_type, 
-                                 sk_a_tensor_type)
-    def decrypt_tensor(ciphertext, mac, pk_c, nonce, sk_a):
-
-      ciphertext = easy_box.Ciphertext(ciphertext)
-      mac = easy_box.Mac(mac)
-      pk_c = easy_box.PublicKey(pk_c)
-      nonce = easy_box.Nonce(nonce)
+      ciphertext = easy_box.Ciphertext(client_outputs[0])
+      mac = easy_box.Mac(client_outputs[1])
+      pk_c = easy_box.PublicKey(client_outputs[2])
+      nonce = easy_box.Nonce(client_outputs[3])
       sk_a = easy_box.SecretKey(sk_a)
 
       plaintext_recovered = easy_box.open_detached(ciphertext, 
@@ -675,7 +666,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
 
-    #Encrypt client tensors
+    # Encrypt client tensors
     pk_a, sk_a = await self._trusted_aggregator_generate_keys()
     enc_client_arg = await self._encrypt_client_tensors(arg, pk_a)
     val_type = enc_client_arg.type_signature
@@ -690,7 +681,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     op_type = arg.type_signature[2]
 
     # Note: this type check is not working because of the new types
-    # returned by encrypt tensors: Types (<float32,float32> -> float32) and 
+    # returned by encrypted tensors: Types (<float32,float32> -> float32) and 
     # (<float32,<uint8[4],uint8[16],uint8[32],uint8[24]>> -> float32) are not equivalent
     # type_utils.check_equivalent_types(
     #     op_type, type_factory.reduction_op(zero_type, item_type))

@@ -938,22 +938,22 @@ class FederatingExecutorTest(parameterized.TestCase):
   @parameterized.named_parameters(
       ('centralized',
        federating_executor.CentralizedIntrinsicStrategy),
-      # ('trusted_aggregator',
-      #  federating_executor.TrustedAggregatorIntrinsicStrategy),
+      ('trusted_aggregator',
+       federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_aggregate_with_simple_integer_sum(self, strategy):
-    @computations.tf_computation(tf.int32, tf.int32)
+    @computations.tf_computation(tf.float32, tf.float32)
     def add_numbers(x, y):
       return x + y
 
-    @computations.tf_computation(tf.int32)
+    @computations.tf_computation(tf.float32)
     def add_one_because_why_not(x):
       return x + 1
 
     @computations.federated_computation
     def comp():
-      x = intrinsics.federated_value(10, placement_literals.CLIENTS)
-      return intrinsics.federated_aggregate(x, 0, add_numbers, add_numbers,
+      x = intrinsics.federated_value(10.0, placement_literals.CLIENTS)
+      return intrinsics.federated_aggregate(x, 0.0, add_numbers, add_numbers,
                                             add_one_because_why_not)
 
     result = _run_test_comp_produces_federated_value(self, comp, num_clients=3,
@@ -963,13 +963,13 @@ class FederatingExecutorTest(parameterized.TestCase):
   @parameterized.named_parameters(
       ('centralized',
        federating_executor.CentralizedIntrinsicStrategy),
-      # ('trusted_aggregator',
-      #  federating_executor.TrustedAggregatorIntrinsicStrategy),
+      ('trusted_aggregator',
+       federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_sum_with_integers(self, strategy):
     @computations.federated_computation
     def comp():
-      x = intrinsics.federated_value(10, placement_literals.CLIENTS)
+      x = intrinsics.federated_value(10.0, placement_literals.CLIENTS)
       return intrinsics.federated_sum(x)
 
     result = _run_test_comp_produces_federated_value(self, comp, num_clients=3,
@@ -1009,8 +1009,8 @@ class FederatingExecutorTest(parameterized.TestCase):
   @parameterized.named_parameters(
       ('centralized',
        federating_executor.CentralizedIntrinsicStrategy),
-      # ('trusted_aggregator',
-      #  federating_executor.TrustedAggregatorIntrinsicStrategy),
+      ('trusted_aggregator',
+       federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_weighted_mean_with_floats(self, strategy):
     loop, ex = _make_test_runtime(num_clients=4,
