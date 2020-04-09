@@ -542,9 +542,11 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _encrypt_client_tensors(self, arg, pk_a):
 
-    input_dtype = arg.type_signature[0].member.dtype
+    input_tensor_type = arg.type_signature[0].member
+    pk_a_tensor_type = pk_a.type_signature
 
-    @computations.tf_computation(input_dtype, tf.uint8)
+    @computations.tf_computation(input_tensor_type, 
+                                 pk_a_tensor_type)
     def encrypt_tensor(plaintext, pk_a):
 
       pk_a = easy_box.PublicKey(pk_a)
@@ -576,9 +578,20 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _decrypt_tensors_on_aggregator(self, val, clients_dtype):
 
-    @computations.tf_computation(tf.uint8, tf.uint8, tf.uint8, tf.uint8, tf.uint8)
-    def decrypt_tensor(ciphertext, mac, pk_c, nonce, sk_a):
+    clients_output_type_signature = val[0].type_signature[0]
+    ciphtertext_tensor_type = clients_output_type_signature[0]
+    mac_tensor_type = clients_output_type_signature[1]
+    pk_c_tensor_type = clients_output_type_signature[2]
+    nonce_tensor_type = clients_output_type_signature[3]
+    sk_a_tensor_type = clients_output_type_signature[3]
 
+    @computations.tf_computation(ciphtertext_tensor_type, 
+                                 mac_tensor_type, 
+                                 pk_c_tensor_type,
+                                 nonce_tensor_type, 
+                                 sk_a_tensor_type)
+    def decrypt_tensor(ciphertext, mac, pk_c, nonce, sk_a):
+      
       ciphertext = easy_box.Ciphertext(ciphertext)
       mac = easy_box.Mac(mac)
       pk_c = easy_box.PublicKey(pk_c)
