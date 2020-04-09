@@ -583,7 +583,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     mac_tensor_type = clients_output_type_signature[1]
     pk_c_tensor_type = clients_output_type_signature[2]
     nonce_tensor_type = clients_output_type_signature[3]
-    sk_a_tensor_type = clients_output_type_signature[3]
+    #sk_a_tensor_type = clients_output_type_signature[4]
+    # BUG  why sk_a_tensor_type is not the  5th element?
+    sk_a_tensor_type = computation_types.TensorType(tf.uint8, [32])
 
     @computations.tf_computation(ciphtertext_tensor_type, 
                                  mac_tensor_type, 
@@ -591,7 +593,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                                  nonce_tensor_type, 
                                  sk_a_tensor_type)
     def decrypt_tensor(ciphertext, mac, pk_c, nonce, sk_a):
-      
+
       ciphertext = easy_box.Ciphertext(ciphertext)
       mac = easy_box.Mac(mac)
       pk_c = easy_box.PublicKey(pk_c)
