@@ -493,57 +493,56 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                     pl, pl_cardinality))
 
   async def _trusted_aggregator_generate_keys(self):
-  
-    pk, sk = easy_box.gen_keypair()
+    
+    @computations.tf_computation()
+    def generate_keys():
+      pk, sk = easy_box.gen_keypair()
+      return pk.raw, sk.raw
 
-    # Place public key on clients
-    clients_ex = self._get_child_executors(placement_literals.CLIENTS)
-    pk_eager_vals = []
-    pk_type = computation_types.TensorType(tf.uint8, pk.raw.shape)
-    for i in range(len(clients_ex)):
-      pk_eager_val = await clients_ex[i].create_value(pk.raw, pk_type)
-      pk_eager_vals.append(pk_eager_val)
+    fn_type = generate_keys.type_signature
+    fn = generate_keys._computation_proto
 
-    pk_a_type = computation_types.FederatedType(
-        pk_type,
-        placement_literals.CLIENTS,
-        all_equal=True)
+    aggregator_ex = self._get_child_executors(placement_literals.AGGREGATOR)[0]
 
-    pk_fed_val = FederatingExecutorValue(pk_eager_vals, pk_type)
+    result = await aggregator_ex.create_call(
+        await aggregator_ex.create_value(fn, fn_type)
+    )
 
-    # Place secret key on the trusted aggregator
-    aggregator_ex = self._get_child_executors(placement_literals.AGGREGATOR)
-    sk_eager_val = await aggregator_ex[0].create_value(sk.raw, pk_type)
-    sk_fed_val = FederatingExecutorValue(sk_eager_val, pk_type)
+    pk = await aggregator_ex.create_selection(result, 0)
+    sk = await aggregator_ex.create_selection(result, 1)
+
+    pk_fed_val = await self._place(pk, placement_literals.AGGREGATOR)
+    pk_fed_val = await self.federated_broadcast(pk_fed_val)
+    sk_fed_val = await self._place(sk, placement_literals.AGGREGATOR)
 
     return pk_fed_val, sk_fed_val
 
   async def _zip_val_key(self, val, key):
-    
-    # zip values and keys EagerValues on each client using their 
-    # respective eager executor
-    val_key_zipped = []
+
+    # zip values and keys EagerValues on each client using 
+    # their respective eager executor.
+    val_key_zips = []
+    key_placement = key.type_signature.placement.name
     for i in range(len(val)):
       client_ex = self._get_child_executors(placement_literals.CLIENTS, index=i)
       val_eager_val = val[i]
-      if isinstance(key.internal_representation, list):
+      if key_placement == 'CLIENTS':
         key_eager_val = key.internal_representation[i]
-      else:
-        key_eager_val = key.internal_representation
-
-      k_v_zip = await client_ex.create_tuple(
+      elif key_placement == 'AGGREGATOR':
+        key_eager_val = key.internal_representation[0]
+      val_key_zip = await client_ex.create_tuple(
           anonymous_tuple.AnonymousTuple([(None, val_eager_val), 
                                           (None, key_eager_val)])
       )
 
-      val_key_zipped.append(k_v_zip)
+      val_key_zips.append(val_key_zip)
 
-    return val_key_zipped
+    return val_key_zips
 
   async def _encrypt_client_tensors(self, arg, pk_a):
 
     input_tensor_type = arg.type_signature[0].member
-    pk_a_tensor_type = pk_a.type_signature
+    pk_a_tensor_type = pk_a.type_signature.member
 
     @computations.tf_computation(input_tensor_type, 
                                  pk_a_tensor_type)
@@ -567,7 +566,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     val_key_zipped = await self._zip_val_key(val, pk_a)
 
-    return await self.federated_map(
+    fed_ex = self.federating_executor
+
+    return await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple(
                 [(None, fn), (None,  val_key_zipped)]),
@@ -606,7 +607,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     fn_type = decrypt_tensor.type_signature
     fn = decrypt_tensor._computation_proto
 
-    return await self.federated_map(
+    fed_ex = self.federating_executor
+
+    return await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple(
                 [(None, fn), (None,  val)]),
@@ -664,9 +667,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     # Encrypt client tensors
     pk_a, sk_a = await self._trusted_aggregator_generate_keys()
-    enc_client_arg = await self._encrypt_client_tensors(arg, pk_a)
-    val_type = enc_client_arg.type_signature
-    val = enc_client_arg.internal_representation
+    enc_clients_arg = await self._encrypt_client_tensors(arg, pk_a)
+    val_type = enc_clients_arg.type_signature
+    val = enc_clients_arg.internal_representation
     # Store original client dtype before encryption for 
     # future decryption
     orig_clients_dtype = arg.type_signature[0].member.dtype
