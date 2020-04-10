@@ -508,12 +508,15 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     result = await aggregator_ex.create_call(await aggregator_ex.create_value(
         fn, fn_type))
 
-    pk = await aggregator_ex.create_selection(result, 0)
-    sk = await aggregator_ex.create_selection(result, 1)
+    keys = await asyncio.gather(*[
+        aggregator_ex.create_selection(result, i)
+        for i in range(len(result.type_signature))
+    ])
 
-    pk_fed_val = await self._place(pk, placement_literals.AGGREGATOR)
+    pk_fed_val, sk_fed_val = await asyncio.gather(
+        *[self._place(k, placement_literals.AGGREGATOR) for k in keys])
+
     pk_fed_val = await self.federated_broadcast(pk_fed_val)
-    sk_fed_val = await self._place(sk, placement_literals.AGGREGATOR)
 
     return pk_fed_val, sk_fed_val
 
