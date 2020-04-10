@@ -334,8 +334,10 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
         *[self._move(v, item_type, child) for v in val])
 
     zero = await child.create_value(
-        await (await self.federating_executor.create_selection(
-            arg, index=1)).compute(), zero_type)
+        await (await
+               self.federating_executor.create_selection(arg,
+                                                         index=1)).compute(),
+        zero_type)
     op = await child.create_value(arg.internal_representation[2], op_type)
 
     result = zero
@@ -393,14 +395,11 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
   async def federated_sum(self, arg):
     py_typecheck.check_type(arg.type_signature, computation_types.FederatedType)
     zero, plus = tuple(await asyncio.gather(*[
-        executor_utils.embed_tf_scalar_constant(
-            self.federating_executor,
-            arg.type_signature.member,
-            0),
+        executor_utils.embed_tf_scalar_constant(self.federating_executor,
+                                                arg.type_signature.member, 0),
         executor_utils.embed_tf_binary_operator(
-            self.federating_executor,
-            arg.type_signature.member,
-            tf.add)]))
+            self.federating_executor, arg.type_signature.member, tf.add)
+    ]))
     return await self.federating_executor._compute_intrinsic_federated_reduce(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([
@@ -413,7 +412,8 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     )
 
   async def federated_mean(self, arg):
-    arg_sum = await self.federating_executor._compute_intrinsic_federated_sum(arg)
+    arg_sum = await self.federating_executor._compute_intrinsic_federated_sum(
+        arg)
     member_type = arg_sum.type_signature.member
     count = float(len(arg.internal_representation))
     if count < 1.0:
@@ -493,7 +493,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                     pl, pl_cardinality))
 
   async def _trusted_aggregator_generate_keys(self):
-    
+
     @computations.tf_computation()
     def generate_keys():
       pk, sk = easy_box.gen_keypair()
@@ -502,12 +502,11 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     fn_type = generate_keys.type_signature
     fn = generate_keys._computation_proto
 
-    aggregator_ex = self._get_child_executors(placement_literals.AGGREGATOR,
-                                              index=0)
+    aggregator_ex = self._get_child_executors(
+        placement_literals.AGGREGATOR, index=0)
 
-    result = await aggregator_ex.create_call(
-        await aggregator_ex.create_value(fn, fn_type)
-    )
+    result = await aggregator_ex.create_call(await aggregator_ex.create_value(
+        fn, fn_type))
 
     pk = await aggregator_ex.create_selection(result, 0)
     sk = await aggregator_ex.create_selection(result, 1)
@@ -520,7 +519,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _zip_val_key(self, val, key):
 
-    # zip values and keys EagerValues on each client using 
+    # zip values and keys EagerValues on each client using
     # their respective eager executor.
     val_key_zips = []
     key_placement = key.type_signature.placement.name
@@ -532,9 +531,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       elif key_placement == 'AGGREGATOR':
         key_eager_val = key.internal_representation[0]
       val_key_zip = await client_ex.create_tuple(
-          anonymous_tuple.AnonymousTuple([(None, val_eager_val), 
-                                          (None, key_eager_val)])
-      )
+          anonymous_tuple.AnonymousTuple([(None, val_eager_val),
+                                          (None, key_eager_val)]))
 
       val_key_zips.append(val_key_zip)
 
@@ -545,18 +543,13 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     input_tensor_type = arg.type_signature[0].member
     pk_a_tensor_type = pk_a.type_signature.member
 
-    @computations.tf_computation(input_tensor_type, 
-                                 pk_a_tensor_type)
+    @computations.tf_computation(input_tensor_type, pk_a_tensor_type)
     def encrypt_tensor(plaintext, pk_a):
 
       pk_a = easy_box.PublicKey(pk_a)
       pk_c, sk_c = easy_box.gen_keypair()
       nonce = easy_box.gen_nonce()
-      ciphertext, mac = easy_box.seal_detached(plaintext, 
-                                               nonce, 
-                                               pk_a, 
-                                               sk_c
-        )
+      ciphertext, mac = easy_box.seal_detached(plaintext, nonce, pk_a, sk_c)
 
       return ciphertext.raw, mac.raw, pk_c.raw, nonce.raw
 
@@ -571,17 +564,16 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     return await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
-            anonymous_tuple.AnonymousTuple(
-                [(None, fn), (None,  val_key_zipped)]),
-            computation_types.NamedTupleType(
-                (fn_type, val_type))))
+            anonymous_tuple.AnonymousTuple([(None, fn),
+                                            (None, val_key_zipped)]),
+            computation_types.NamedTupleType((fn_type, val_type))))
 
   async def _decrypt_tensors_on_aggregator(self, val, clients_dtype):
-  
+
     client_output_type_signature = val[0].type_signature[0]
     aggregator_public_key_type_signature = val[0].type_signature[1]
 
-    @computations.tf_computation(client_output_type_signature, 
+    @computations.tf_computation(client_output_type_signature,
                                  aggregator_public_key_type_signature)
     def decrypt_tensor(client_outputs, sk_a):
 
@@ -591,18 +583,14 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       nonce = easy_box.Nonce(client_outputs[3])
       sk_a = easy_box.SecretKey(sk_a)
 
-      plaintext_recovered = easy_box.open_detached(ciphertext, 
-                                                   mac, 
-                                                   nonce, 
-                                                   pk_c, 
-                                                   sk_a, 
-                                                   clients_dtype)
+      plaintext_recovered = easy_box.open_detached(ciphertext, mac, nonce, pk_c,
+                                                   sk_a, clients_dtype)
 
       return plaintext_recovered
 
     val_type = computation_types.FederatedType(
         computation_types.TensorType(clients_dtype),
-        placement_literals.SERVER,
+        placement_literals.AGGREGATOR,
         all_equal=False)
 
     fn_type = decrypt_tensor.type_signature
@@ -612,10 +600,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     return await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
-            anonymous_tuple.AnonymousTuple(
-                [(None, fn), (None,  val)]),
-            computation_types.NamedTupleType(
-                (fn_type, val_type))))
+            anonymous_tuple.AnonymousTuple([(None, fn), (None, val)]),
+            computation_types.NamedTupleType((fn_type, val_type))))
 
   async def federated_value_at_server(self, arg):
     return await self._place(arg, placement_literals.SERVER)
@@ -671,7 +657,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     enc_clients_arg = await self._encrypt_client_tensors(arg, pk_a)
     val_type = enc_clients_arg.type_signature
     val = enc_clients_arg.internal_representation
-    # Store original client dtype before encryption for 
+    # Store original client dtype before encryption for
     # future decryption
     orig_clients_dtype = arg.type_signature[0].member.dtype
 
@@ -681,7 +667,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     op_type = arg.type_signature[2]
 
     # Note: this type check is not working because of the new types
-    # returned by encrypted tensors: Types (<float32,float32> -> float32) and 
+    # returned by encrypted tensors: Types (<float32,float32> -> float32) and
     # (<float32,<uint8[4],uint8[16],uint8[32],uint8[24]>> -> float32) are not equivalent
     # type_utils.check_equivalent_types(
     #     op_type, type_factory.reduction_op(zero_type, item_type))
@@ -693,20 +679,19 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
         *[self._move(v, item_type, aggr) for v in val])
 
     aggregands_key_zipped = await self._zip_val_key(aggregands, sk_a)
-    
+
     # Decrypt tensors moved to the server before applying reduce
     # In the future should be decrypted by the Trusted aggregator
     aggregands_decrypted = []
     for item in aggregands_key_zipped:
       decrypted_tensor = await self._decrypt_tensors_on_aggregator(
-          [item], 
-          orig_clients_dtype
-        )
+          [item], orig_clients_dtype)
       aggregands_decrypted.append(decrypted_tensor.internal_representation[0])
 
     zero = await aggr.create_value(
-        await (await self.federating_executor.create_selection(
-            arg, index=1)).compute(),
+        await (await
+               self.federating_executor.create_selection(arg,
+                                                         index=1)).compute(),
         zero_type)
     op = await aggr.create_value(arg.internal_representation[2], op_type)
 
@@ -765,14 +750,11 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
   async def federated_sum(self, arg):
     py_typecheck.check_type(arg.type_signature, computation_types.FederatedType)
     zero, plus = tuple(await asyncio.gather(*[
-        executor_utils.embed_tf_scalar_constant(
-            self.federating_executor,
-            arg.type_signature.member,
-            0),
+        executor_utils.embed_tf_scalar_constant(self.federating_executor,
+                                                arg.type_signature.member, 0),
         executor_utils.embed_tf_binary_operator(
-            self.federating_executor,
-            arg.type_signature.member,
-            tf.add)]))
+            self.federating_executor, arg.type_signature.member, tf.add)
+    ]))
     return await self.federating_executor._compute_intrinsic_federated_reduce(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([
@@ -857,7 +839,9 @@ class FederatingExecutor(executor_base.Executor):
   # TODO(b/134543154): Implement the commonly used aggregation intrinsics so we
   # can begin to use this executor in integration tests.
 
-  def __init__(self, target_executors, intrinsic_strategy_fn=CentralizedIntrinsicStrategy):
+  def __init__(self,
+               target_executors,
+               intrinsic_strategy_fn=CentralizedIntrinsicStrategy):
     """Creates a federated executor backed by a collection of target executors.
 
     Args:
