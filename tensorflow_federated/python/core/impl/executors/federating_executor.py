@@ -502,7 +502,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     fn_type = generate_keys.type_signature
     fn = generate_keys._computation_proto
 
-    aggregator_ex = self._get_child_executors(placement_literals.AGGREGATOR)[0]
+    aggregator_ex = self._get_child_executors(placement_literals.AGGREGATOR,
+                                              index=0)
 
     result = await aggregator_ex.create_call(
         await aggregator_ex.create_value(fn, fn_type)
