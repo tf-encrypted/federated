@@ -567,9 +567,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     val_key_zipped = await self._zip_val_key(val, pk_a)
 
-    fed_ex = self.federating_executor
-
-    return await fed_ex._compute_intrinsic_federated_map(
+    return await self.federated_map(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple(
                 [(None, fn), (None,  val_key_zipped)]),
@@ -608,9 +606,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     fn_type = decrypt_tensor.type_signature
     fn = decrypt_tensor._computation_proto
 
-    fed_ex = self.federating_executor
-
-    return await fed_ex._compute_intrinsic_federated_map(
+    return await self.federated_map(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple(
                 [(None, fn), (None,  val)]),
