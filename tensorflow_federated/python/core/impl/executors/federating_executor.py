@@ -669,12 +669,6 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     zero_type = arg.type_signature[1]
     op_type = arg.type_signature[2]
 
-    # Note: this type check is not working because of the new types
-    # returned by encrypted tensors: Types (<float32,float32> -> float32) and
-    # (<float32,<uint8[4],uint8[16],uint8[32],uint8[24]>> -> float32) are not equivalent
-    # type_utils.check_equivalent_types(
-    #     op_type, type_factory.reduction_op(zero_type, item_type))
-
     py_typecheck.check_type(val, list)
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
 
@@ -697,6 +691,10 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                                                          index=1)).compute(),
         zero_type)
     op = await aggr.create_value(arg.internal_representation[2], op_type)
+
+    for item in aggregands_decrypted:
+      type_utils.check_equivalent_types(
+          op_type, type_factory.reduction_op(zero_type, item.type_signature))
 
     result = zero
     for item in aggregands_decrypted:
