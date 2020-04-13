@@ -505,12 +505,12 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     aggregator_ex = self._get_child_executors(
         placement_literals.AGGREGATOR, index=0)
 
-    result = await aggregator_ex.create_call(await aggregator_ex.create_value(
+    key_generator = await aggregator_ex.create_call(await aggregator_ex.create_value(
         fn, fn_type))
 
     keys = await asyncio.gather(*[
-        aggregator_ex.create_selection(result, i)
-        for i in range(len(result.type_signature))
+        aggregator_ex.create_selection(key_generator, i)
+        for i in range(len(key_generator.type_signature))
     ])
 
     pk_fed_val, sk_fed_val = await asyncio.gather(
@@ -520,22 +520,22 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     return pk_fed_val, sk_fed_val
 
-  async def _zip_val_key(self, val, key):
+  async def _zip_val_key(self, vals, key):
 
     # zip values and keys EagerValues on each client using
     # their respective eager executor.
     val_key_zips = []
     key_placement = key.type_signature.placement.name
-    for i in range(len(val)):
+    for i in range(len(vals)):
       client_ex = self._get_child_executors(placement_literals.CLIENTS, index=i)
-      val_eager_val = val[i]
+      val = vals[i]
       if key_placement == 'CLIENTS':
-        key_eager_val = key.internal_representation[i]
+        key_val = key.internal_representation[i]
       elif key_placement == 'AGGREGATOR':
-        key_eager_val = key.internal_representation[0]
+        key_val = key.internal_representation[0]
       val_key_zip = await client_ex.create_tuple(
-          anonymous_tuple.AnonymousTuple([(None, val_eager_val),
-                                          (None, key_eager_val)]))
+          anonymous_tuple.AnonymousTuple([(None, val),
+                                          (None, key_val)]))
 
       val_key_zips.append(val_key_zip)
 
