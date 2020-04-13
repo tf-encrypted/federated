@@ -503,7 +503,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     fn = generate_keys._computation_proto
 
     aggregator_ex = self._get_child_executors(
-        placement_literals.AGGREGATOR, index=0)
+        placement_literals.AGGREGATORS, index=0)
 
     key_generator = await aggregator_ex.create_call(await aggregator_ex.create_value(
         fn, fn_type))
@@ -514,7 +514,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     ])
 
     pk_fed_val, sk_fed_val = await asyncio.gather(
-        *[self._place(k, placement_literals.AGGREGATOR) for k in keys])
+        *[self._place(k, placement_literals.AGGREGATORS) for k in keys])
 
     pk_fed_val = await self.federated_broadcast(pk_fed_val)
 
@@ -531,7 +531,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       val = vals[i]
       if key_placement == 'CLIENTS':
         key_val = key.internal_representation[i]
-      elif key_placement == 'AGGREGATOR':
+      elif key_placement == 'AGGREGATORS':
         key_val = key.internal_representation[0]
       val_key_zip = await client_ex.create_tuple(
           anonymous_tuple.AnonymousTuple([(None, val),
@@ -593,7 +593,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     val_type = computation_types.FederatedType(
         computation_types.TensorType(clients_dtype),
-        placement_literals.AGGREGATOR,
+        placement_literals.AGGREGATORS,
         all_equal=False)
 
     fn_type = decrypt_tensor.type_signature
@@ -775,6 +775,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       raise RuntimeError('Cannot compute a federated mean over an empty group.')
     child = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
     factor, multiply = tuple(await asyncio.gather(*[
+        executor_utils.embed_tf_scalar_constant(child, member_type,
+                                                float(1.0 / count)),
+        executor_utils.embed_tf_binary_operator(child, member_type, tf.multiply)
     ]))
     multiply_arg = await child.create_tuple(
         anonymous_tuple.AnonymousTuple([(None,
