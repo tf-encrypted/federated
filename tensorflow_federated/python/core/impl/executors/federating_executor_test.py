@@ -47,7 +47,7 @@ def create_test_executor(
     num_clients=1,
     use_reference_resolving_executor=False,
     intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy,
-  ) -> federating_executor.FederatingExecutor:
+) -> federating_executor.FederatingExecutor:
   bottom_ex = eager_tf_executor.EagerTFExecutor()
   if use_reference_resolving_executor:
     bottom_ex = reference_resolving_executor.ReferenceResolvingExecutor(
@@ -65,8 +65,8 @@ def create_test_executor(
 
 def create_test_executor_factory(
     intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy):
-  executor = create_test_executor(num_clients=1,
-      intrinsic_strategy_fn=intrinsic_strategy_fn)
+  executor = create_test_executor(
+      num_clients=1, intrinsic_strategy_fn=intrinsic_strategy_fn)
   return executor_factory.ExecutorFactoryImpl(lambda _: executor)
 
 
@@ -98,7 +98,10 @@ def _run_comp_with_runtime(comp, runtime: Runtime):
   return loop.run_until_complete(call_value())
 
 
-def _run_test_comp(comp, num_clients=1, use_reference_resolving_executor=False,
+def _run_test_comp(
+    comp,
+    num_clients=1,
+    use_reference_resolving_executor=False,
     intrinsic_strategy_fn=federating_executor.CentralizedIntrinsicStrategy):
   """Runs a computation (unapplied TFF function) using a test runtime."""
   runtime = _make_test_runtime(
@@ -160,8 +163,7 @@ class FederatingExecutorCreateValueTest(executor_test_utils.AsyncTestCase,
 
   # pyformat: disable
   @parameterized.named_parameters([
-      ('intrinsic_def',
-       *executor_test_utils.create_dummy_intrinsic_def()),
+      ('intrinsic_def', *executor_test_utils.create_dummy_intrinsic_def()),
       ('placement_literal',
        *executor_test_utils.create_dummy_placement_literal()),
       ('computation_impl',
@@ -186,8 +188,7 @@ class FederatingExecutorCreateValueTest(executor_test_utils.AsyncTestCase,
        *executor_test_utils.create_dummy_value_clients_all_equal()),
       ('federated_type_server',
        *executor_test_utils.create_dummy_value_server()),
-      ('unplaced_type',
-       *executor_test_utils.create_dummy_value_unplaced()),
+      ('unplaced_type', *executor_test_utils.create_dummy_value_unplaced()),
   ])
   # pyformat: enable
   def test_returns_value_with_value_and_type(self, value, type_signature):
@@ -232,16 +233,14 @@ class FederatingExecutorCreateValueTest(executor_test_utils.AsyncTestCase,
 
   # pyformat: disable
   @parameterized.named_parameters([
-      ('intrinsic_def',
-       *executor_test_utils.create_dummy_intrinsic_def()),
+      ('intrinsic_def', *executor_test_utils.create_dummy_intrinsic_def()),
       ('federated_type_clients',
        *executor_test_utils.create_dummy_value_clients()),
       ('federated_type_clients_all_equal',
        *executor_test_utils.create_dummy_value_clients_all_equal()),
       ('federated_type_server',
        *executor_test_utils.create_dummy_value_server()),
-      ('unplaced_type',
-       *executor_test_utils.create_dummy_value_unplaced()),
+      ('unplaced_type', *executor_test_utils.create_dummy_value_unplaced()),
   ])
   # pyformat: enable
   def test_raises_type_error_with_value_only(self, value, _):
@@ -252,8 +251,7 @@ class FederatingExecutorCreateValueTest(executor_test_utils.AsyncTestCase,
 
   # pyformat: disable
   @parameterized.named_parameters([
-      ('intrinsic_def',
-       *executor_test_utils.create_dummy_intrinsic_def()),
+      ('intrinsic_def', *executor_test_utils.create_dummy_intrinsic_def()),
       ('placement_literal',
        *executor_test_utils.create_dummy_placement_literal()),
       ('computation_impl',
@@ -266,8 +264,7 @@ class FederatingExecutorCreateValueTest(executor_test_utils.AsyncTestCase,
        *executor_test_utils.create_dummy_value_clients_all_equal()),
       ('federated_type_server',
        *executor_test_utils.create_dummy_value_server()),
-      ('unplaced_type',
-       *executor_test_utils.create_dummy_value_unplaced()),
+      ('unplaced_type', *executor_test_utils.create_dummy_value_unplaced()),
   ])
   # pyformat: enable
   def test_raises_type_error_with_value_and_bad_type(self, value, _):
@@ -407,11 +404,9 @@ class FederatingExecutorCreateCallTest(executor_test_utils.AsyncTestCase,
 
   # pyformat: disable
   @parameterized.named_parameters([
-      ('intrinsic_def',
-       *executor_test_utils.create_dummy_intrinsic_def(),
+      ('intrinsic_def', *executor_test_utils.create_dummy_intrinsic_def(),
        *executor_test_utils.create_dummy_computation_tensorflow_constant()),
-      ('computation_impl',
-       *executor_test_utils.create_dummy_computation_impl(),
+      ('computation_impl', *executor_test_utils.create_dummy_computation_impl(),
        *executor_test_utils.create_dummy_value_unplaced()),
       ('computation_intrinsic',
        *executor_test_utils.create_dummy_computation_intrinsic(),
@@ -453,8 +448,7 @@ class FederatingExecutorCreateCallTest(executor_test_utils.AsyncTestCase,
 
   # pyformat: disable
   @parameterized.named_parameters([
-      ('intrinsic_def',
-       *executor_test_utils.create_dummy_intrinsic_def()),
+      ('intrinsic_def', *executor_test_utils.create_dummy_intrinsic_def()),
       ('computation_impl',
        *executor_test_utils.create_dummy_computation_impl()),
       ('computation_intrinsic',
@@ -510,8 +504,7 @@ class FederatingExecutorCreateCallTest(executor_test_utils.AsyncTestCase,
        *executor_test_utils.create_dummy_value_clients_all_equal()),
       ('federated_type_server',
        *executor_test_utils.create_dummy_value_server()),
-      ('unplaced_type',
-       *executor_test_utils.create_dummy_value_unplaced()),
+      ('unplaced_type', *executor_test_utils.create_dummy_value_unplaced()),
   ])
   # pyformat: enable
   def test_raises_value_error_with_comp(self, comp, comp_type):
@@ -551,8 +544,7 @@ class FederatingExecutorCreateTupleTest(executor_test_utils.AsyncTestCase,
 
   # pyformat: disable
   @parameterized.named_parameters([
-      ('intrinsic_def',
-       *executor_test_utils.create_dummy_intrinsic_def()),
+      ('intrinsic_def', *executor_test_utils.create_dummy_intrinsic_def()),
       ('placement_literal',
        *executor_test_utils.create_dummy_placement_literal()),
       ('computation_impl',
@@ -577,8 +569,7 @@ class FederatingExecutorCreateTupleTest(executor_test_utils.AsyncTestCase,
        *executor_test_utils.create_dummy_value_clients_all_equal()),
       ('federated_type_server',
        *executor_test_utils.create_dummy_value_server()),
-      ('unplaced_type',
-       *executor_test_utils.create_dummy_value_unplaced()),
+      ('unplaced_type', *executor_test_utils.create_dummy_value_unplaced()),
   ])
   # pyformat: enable
   def test_returns_value_with_elements(self, element, type_signature):
@@ -605,12 +596,12 @@ class FederatingExecutorCreateTupleTest(executor_test_utils.AsyncTestCase,
 class FederatingExecutorTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_value_at_server(self, strategy):
+
     @computations.federated_computation
     def comp():
       return intrinsics.federated_value(10, placement_literals.SERVER)
@@ -626,13 +617,14 @@ class FederatingExecutorTest(parameterized.TestCase):
         val.internal_representation[0].internal_representation.numpy(), 10)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
-  def test_federated_value_at_client_with_zero_clients_raises_error(self, strategy):
+  def test_federated_value_at_client_with_zero_clients_raises_error(
+      self, strategy):
     self.skipTest('b/145936344')
+
     @computations.federated_computation
     def comp():
       return intrinsics.federated_broadcast(
@@ -646,12 +638,12 @@ class FederatingExecutorTest(parameterized.TestCase):
       val.compute()
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_value_at_server_with_tuple(self, strategy):
+
     @computations.federated_computation
     def comp():
       return intrinsics.federated_value([10, 10], placement_literals.SERVER)
@@ -669,12 +661,12 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(inner_eager_value.internal_representation[1].numpy(), 10)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_value_at_clients(self, strategy):
+
     @computations.federated_computation
     def comp():
       return intrinsics.federated_value(10, placement_literals.CLIENTS)
@@ -689,8 +681,7 @@ class FederatingExecutorTest(parameterized.TestCase):
       self.assertEqual(v.internal_representation.numpy(), 10)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -702,8 +693,8 @@ class FederatingExecutorTest(parameterized.TestCase):
       return intrinsics.federated_eval(return_five, placement_literals.CLIENTS)
 
     num_clients = 3
-    val = _run_test_comp(comp, num_clients=num_clients,
-        intrinsic_strategy_fn=strategy)
+    val = _run_test_comp(
+        comp, num_clients=num_clients, intrinsic_strategy_fn=strategy)
     self.assertIsInstance(val, federating_executor.FederatingExecutorValue)
     self.assertEqual(str(val.type_signature), '{int32}@CLIENTS')
     self.assertIsInstance(val.internal_representation, list)
@@ -713,8 +704,7 @@ class FederatingExecutorTest(parameterized.TestCase):
       self.assertEqual(v.internal_representation.numpy(), 5)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -726,8 +716,8 @@ class FederatingExecutorTest(parameterized.TestCase):
       return intrinsics.federated_eval(return_five, placement_literals.SERVER)
 
     num_clients = 3
-    val = _run_test_comp(comp, num_clients=num_clients,
-        intrinsic_strategy_fn=strategy)
+    val = _run_test_comp(
+        comp, num_clients=num_clients, intrinsic_strategy_fn=strategy)
     self.assertIsInstance(val, federating_executor.FederatingExecutorValue)
     self.assertEqual(str(val.type_signature), 'int32@SERVER')
     self.assertIsInstance(val.internal_representation, list)
@@ -737,8 +727,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(v.internal_representation.numpy(), 5)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -750,8 +739,8 @@ class FederatingExecutorTest(parameterized.TestCase):
       return intrinsics.federated_eval(rand, placement_literals.CLIENTS)
 
     num_clients = 3
-    val = _run_test_comp(comp, num_clients=num_clients,
-        intrinsic_strategy_fn=strategy)
+    val = _run_test_comp(
+        comp, num_clients=num_clients, intrinsic_strategy_fn=strategy)
     self.assertIsInstance(val, federating_executor.FederatingExecutorValue)
     self.assertEqual(str(val.type_signature), '{float32}@CLIENTS')
     self.assertIsInstance(val.internal_representation, list)
@@ -765,8 +754,7 @@ class FederatingExecutorTest(parameterized.TestCase):
       previous_values.add(number)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -794,8 +782,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(result.numpy(), 11)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -820,8 +807,7 @@ class FederatingExecutorTest(parameterized.TestCase):
       self.assertEqual(v.internal_representation.numpy(), 11)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -850,12 +836,12 @@ class FederatingExecutorTest(parameterized.TestCase):
       self.assertEqual(v.internal_representation.numpy(), 11)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_broadcast(self, strategy):
+
     @computations.federated_computation
     def comp():
       return intrinsics.federated_broadcast(
@@ -871,14 +857,12 @@ class FederatingExecutorTest(parameterized.TestCase):
       self.assertEqual(v.internal_representation.numpy(), 10)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_zip(self, strategy):
-    loop, ex = _make_test_runtime(num_clients=3,
-        intrinsic_strategy_fn=strategy)
+    loop, ex = _make_test_runtime(num_clients=3, intrinsic_strategy_fn=strategy)
 
     @computations.federated_computation
     def ten_on_server():
@@ -915,12 +899,12 @@ class FederatingExecutorTest(parameterized.TestCase):
         self.assertEqual(_print(result), expected_result)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_reduce_with_simple_integer_sum(self, strategy):
+
     @computations.tf_computation(tf.int32, tf.int32)
     def add_numbers(x, y):
       return x + y
@@ -931,17 +915,17 @@ class FederatingExecutorTest(parameterized.TestCase):
           intrinsics.federated_value(10, placement_literals.CLIENTS), 0,
           add_numbers)
 
-    result = _run_test_comp_produces_federated_value(self, comp, num_clients=3,
-        intrinsic_strategy_fn=strategy)
+    result = _run_test_comp_produces_federated_value(
+        self, comp, num_clients=3, intrinsic_strategy_fn=strategy)
     self.assertEqual(result.numpy(), 30)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_aggregate_with_simple_integer_sum(self, strategy):
+
     @computations.tf_computation(tf.int32, tf.int32)
     def add_numbers(x, y):
       return x + y
@@ -956,35 +940,36 @@ class FederatingExecutorTest(parameterized.TestCase):
       return intrinsics.federated_aggregate(x, 0, add_numbers, add_numbers,
                                             add_one_because_why_not)
 
-    result = _run_test_comp_produces_federated_value(self, comp, num_clients=3,
-        intrinsic_strategy_fn=strategy)
+    result = _run_test_comp_produces_federated_value(
+        self, comp, num_clients=3, intrinsic_strategy_fn=strategy)
     self.assertEqual(result.numpy(), 31)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_sum_with_integers(self, strategy):
+
     @computations.federated_computation
     def comp():
       x = intrinsics.federated_value(10, placement_literals.CLIENTS)
       return intrinsics.federated_sum(x)
 
-    result = _run_test_comp_produces_federated_value(self, comp, num_clients=3,
-        intrinsic_strategy_fn=strategy)
+    result = _run_test_comp_produces_federated_value(
+        self, comp, num_clients=3, intrinsic_strategy_fn=strategy)
     self.assertEqual(result.numpy(), 30)
 
+
+class FederatingExecutorTest(parameterized.TestCase):
+
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_mean_with_floats(self, strategy):
-    loop, ex = _make_test_runtime(num_clients=4,
-        intrinsic_strategy_fn=strategy)
+    loop, ex = _make_test_runtime(num_clients=4, intrinsic_strategy_fn=strategy)
 
     v1 = loop.run_until_complete(
         ex.create_value([1.0, 2.0, 3.0, 4.0],
@@ -1007,14 +992,15 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(result.numpy(), 2.5)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_federated_weighted_mean_with_floats(self, strategy):
-    loop, ex = _make_test_runtime(num_clients=4,
-        use_reference_resolving_executor=True, intrinsic_strategy_fn=strategy)
+    loop, ex = _make_test_runtime(
+        num_clients=4,
+        use_reference_resolving_executor=True,
+        intrinsic_strategy_fn=strategy)
 
     v1 = loop.run_until_complete(
         ex.create_value([1.0, 2.0, 3.0, 4.0],
@@ -1050,8 +1036,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertAlmostEqual(result.numpy(), 2.1, places=3)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -1068,18 +1053,15 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(result, 10)
 
   @parameterized.named_parameters(
-      (('_'.join([x[0], y[0]]), x[1], y[1]) for x in [
-              ('tuple', (1, 2, 3, 4)),
-              ('set', set([1, 2, 3, 4])),
-              ('frozenset', frozenset([1, 2, 3, 4]))]
-          for y in [
-              ('centralized',
-               federating_executor.CentralizedIntrinsicStrategy),
-              ('trusted_aggregator',
-               federating_executor.TrustedAggregatorIntrinsicStrategy)]))
+      (('_'.join([x[0], y[0]]), x[1], y[1])
+       for x in [('tuple', (1, 2, 3, 4)), (
+           'set', set([1, 2, 3, 4])), ('frozenset', frozenset([1, 2, 3, 4]))]
+       for y in [('centralized',
+                  federating_executor.CentralizedIntrinsicStrategy),
+                 ('trusted_aggregator',
+                  federating_executor.TrustedAggregatorIntrinsicStrategy)]))
   def test_with_federated_value_as_a_non_py_list(self, val, strategy):
-    loop, ex = _make_test_runtime(
-        num_clients=4, intrinsic_strategy_fn=strategy)
+    loop, ex = _make_test_runtime(num_clients=4, intrinsic_strategy_fn=strategy)
     v = loop.run_until_complete(
         ex.create_value(val, type_factory.at_clients(tf.int32)))
     self.assertEqual(str(v.type_signature), '{int32}@CLIENTS')
@@ -1088,8 +1070,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertCountEqual(result, [1, 2, 3, 4])
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -1120,14 +1101,12 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertCountEqual(result, [1, 2, 3, 4])
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
   def test_create_selection_by_name_anonymous_tuple_backed(self, strategy):
-    loop, ex = _make_test_runtime(
-        num_clients=4, intrinsic_strategy_fn=strategy)
+    loop, ex = _make_test_runtime(num_clients=4, intrinsic_strategy_fn=strategy)
 
     v1 = loop.run_until_complete(
         ex.create_value([1.0, 2.0, 3.0, 4.0],
@@ -1151,8 +1130,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertCountEqual(result, [5, 10, 3, 2])
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -1173,8 +1151,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(result, 1)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -1197,8 +1174,7 @@ class FederatingExecutorTest(parameterized.TestCase):
     self.assertEqual(result, 1)
 
   @parameterized.named_parameters(
-      ('centralized',
-       federating_executor.CentralizedIntrinsicStrategy),
+      ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
        federating_executor.TrustedAggregatorIntrinsicStrategy),
   )
@@ -1239,8 +1215,7 @@ class FederatingExecutorTest(parameterized.TestCase):
 
   def test_federated_collect_trusted_aggregator_fails(self):
     strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
-    loop, ex = _make_test_runtime(
-        num_clients=3, intrinsic_strategy_fn=strategy)
+    loop, ex = _make_test_runtime(num_clients=3, intrinsic_strategy_fn=strategy)
 
     @computations.federated_computation
     def comp():
@@ -1251,6 +1226,7 @@ class FederatingExecutorTest(parameterized.TestCase):
       val = _run_comp_with_runtime(comp, (loop, ex))
 
   def test_federated_collect_with_map_call(self):
+
     @computations.tf_computation()
     def make_dataset():
       return tf.data.Dataset.range(5)
@@ -1272,20 +1248,73 @@ class FederatingExecutorTest(parameterized.TestCase):
 class IntrinsicStrategyTest(parameterized.TestCase):
 
   def test_improper_intrinsic_strategy_fn(self):
+
     class MockIntrinsicStrategy:
-      def __init__(self, parent_executor): self.executor = parent_executor
+
+      def __init__(self, parent_executor):
+        self.executor = parent_executor
+
       @classmethod
-      def validate_target_executors(cls, target_executors): pass
+      def validate_target_executors(cls, target_executors):
+        pass
 
     with self.assertRaises(TypeError):
       create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
 
   def test_placement_validate_necessary(self):
+
     class MockIntrinsicStrategy(federating_executor.IntrinsicStrategy):
-      def __init__(self, parent_executor): self.executor = parent_executor
+
+      def __init__(self, parent_executor):
+        self.executor = parent_executor
 
     with self.assertRaises(TypeError):
       create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
+
+
+class EncryptionTest(parameterized.TestCase):
+
+  def test_generate_aggregator_keys(self):
+    strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
+    loop, ex = _make_test_runtime(intrinsic_strategy_fn=strategy)
+    generate_keys = ex.intrinsic_strategy._trusted_aggregator_generate_keys()
+    pk, sk = loop.run_until_complete(generate_keys)
+
+    self.assertEqual(str(pk.type_signature), 'uint8[32]@CLIENTS')
+    self.assertEqual(str(sk.type_signature), 'uint8[32]@AGGREGATORS')
+
+  def test_encryption_decryption(self):
+
+    strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
+    loop, ex = _make_test_runtime(intrinsic_strategy_fn=strategy)
+    strat_ex = ex.intrinsic_strategy
+
+    pk_a, sk_a = loop.run_until_complete(
+        strat_ex._trusted_aggregator_generate_keys())
+
+    val = loop.run_until_complete(
+        ex.create_value([2.0], type_factory.at_clients(tf.float32)))
+
+    val_enc = loop.run_until_complete(
+        strat_ex._encrypt_client_tensors(val, pk_a))
+
+    aggr = strat_ex._get_child_executors(
+        placement_literals.AGGREGATORS, index=0)
+
+    enc_val_on_aggr = loop.run_until_complete(
+        strat_ex._move(val_enc.internal_representation[0],
+                       val_enc.type_signature.member, aggr))
+
+    val_key_zipped = loop.run_until_complete(
+        strat_ex._zip_val_key([enc_val_on_aggr], sk_a,
+                              placement_literals.AGGREGATORS))
+
+    val_dec = loop.run_until_complete(
+        strat_ex._decrypt_tensors_on_aggregator(val_key_zipped, tf.float32))
+
+    dec_tf_tensor = val_dec.internal_representation[0].internal_representation
+
+    self.assertEqual(dec_tf_tensor, tf.constant(2.0, dtype=tf.float32))
 
 
 if __name__ == '__main__':
