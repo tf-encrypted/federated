@@ -505,8 +505,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     aggregator_ex = self._get_child_executors(
         placement_literals.AGGREGATORS, index=0)
 
-    key_generator = await aggregator_ex.create_call(await aggregator_ex.create_value(
-        fn, fn_type))
+    key_generator = await aggregator_ex.create_call(await
+                                                    aggregator_ex.create_value(
+                                                        fn, fn_type))
 
     keys = await asyncio.gather(*[
         aggregator_ex.create_selection(key_generator, i)
@@ -534,8 +535,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       elif key_placement == 'AGGREGATORS':
         key_val = key.internal_representation[0]
       val_key_zip = await client_ex.create_tuple(
-          anonymous_tuple.AnonymousTuple([(None, val),
-                                          (None, key_val)]))
+          anonymous_tuple.AnonymousTuple([(None, val), (None, key_val)]))
 
       val_key_zips.append(val_key_zip)
 
@@ -543,7 +543,12 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _encrypt_client_tensors(self, arg, pk_a):
 
-    input_tensor_type = arg.type_signature[0].member
+    nb_clients = len(self._get_child_executors(placement_literals.CLIENTS))
+
+    if nb_clients == 1:
+      input_tensor_type = arg.type_signature.member
+    else:
+      input_tensor_type = arg.type_signature[0].member
     pk_a_tensor_type = pk_a.type_signature.member
 
     @computations.tf_computation(input_tensor_type, pk_a_tensor_type)
@@ -558,8 +563,12 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     fn_type = encrypt_tensor.type_signature
     fn = encrypt_tensor._computation_proto
-    val_type = arg.type_signature[0]
-    val = arg.internal_representation[0]
+    if nb_clients == 1:
+      val_type = arg.type_signature
+      val = arg.internal_representation
+    else:
+      val_type = arg.type_signature[0]
+      val = arg.internal_representation[0]
 
     val_key_zipped = await self._zip_val_key(val, pk_a)
 
@@ -768,7 +777,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     )
 
   async def federated_mean(self, arg):
-    arg_sum = await self.federating_executor._compute_intrinsic_federated_sum(arg)
+    arg_sum = await self.federating_executor._compute_intrinsic_federated_sum(
+        arg)
     member_type = arg_sum.type_signature.member
     count = float(len(arg.internal_representation))
     if count < 1.0:
