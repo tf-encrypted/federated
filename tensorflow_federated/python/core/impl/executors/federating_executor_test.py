@@ -905,14 +905,14 @@ class FederatingExecutorTest(parameterized.TestCase):
   )
   def test_federated_reduce_with_simple_integer_sum(self, strategy):
 
-    @computations.tf_computation(tf.float32, tf.float32)
+    @computations.tf_computation(tf.int32, tf.int32)
     def add_numbers(x, y):
       return x + y
 
     @computations.federated_computation
     def comp():
       return intrinsics.federated_reduce(
-          intrinsics.federated_value(10.0, placement_literals.CLIENTS), 0.0,
+          intrinsics.federated_value(10, placement_literals.CLIENTS), 0,
           add_numbers)
 
     result = _run_test_comp_produces_federated_value(
@@ -926,18 +926,18 @@ class FederatingExecutorTest(parameterized.TestCase):
   )
   def test_federated_aggregate_with_simple_integer_sum(self, strategy):
 
-    @computations.tf_computation(tf.float32, tf.float32)
+    @computations.tf_computation(tf.int32, tf.int32)
     def add_numbers(x, y):
       return x + y
 
-    @computations.tf_computation(tf.float32)
+    @computations.tf_computation(tf.int32)
     def add_one_because_why_not(x):
       return x + 1
 
     @computations.federated_computation
     def comp():
-      x = intrinsics.federated_value(10.0, placement_literals.CLIENTS)
-      return intrinsics.federated_aggregate(x, 0.0, add_numbers, add_numbers,
+      x = intrinsics.federated_value(10, placement_literals.CLIENTS)
+      return intrinsics.federated_aggregate(x, 0, add_numbers, add_numbers,
                                             add_one_because_why_not)
 
     result = _run_test_comp_produces_federated_value(
@@ -953,7 +953,7 @@ class FederatingExecutorTest(parameterized.TestCase):
 
     @computations.federated_computation
     def comp():
-      x = intrinsics.federated_value(10.0, placement_literals.CLIENTS)
+      x = intrinsics.federated_value(10, placement_literals.CLIENTS)
       return intrinsics.federated_sum(x)
 
     result = _run_test_comp_produces_federated_value(
