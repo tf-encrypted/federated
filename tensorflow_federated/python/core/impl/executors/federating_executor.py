@@ -521,25 +521,21 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     return pk_fed_val, sk_fed_val
 
-  async def _zip_val_key(self, vals, key):
+  async def _zip_val_key(self, vals, key, placement):
 
     # zip values and keys EagerValues on each client using
     # their respective eager executor.
-    val_key_zips = []
-    key_placement = key.type_signature.placement.name
-    for i in range(len(vals)):
-      client_ex = self._get_child_executors(placement_literals.CLIENTS, index=i)
-      val = vals[i]
-      if key_placement == 'CLIENTS':
-        key_val = key.internal_representation[i]
-      elif key_placement == 'AGGREGATORS':
-        key_val = key.internal_representation[0]
-      val_key_zip = await client_ex.create_tuple(
-          anonymous_tuple.AnonymousTuple([(None, val), (None, key_val)]))
+    val_type = computation_types.FederatedType(
+        vals[0].type_signature, placement, all_equal=False)
 
-      val_key_zips.append(val_key_zip)
+    vals_key = FederatingExecutorValue(
+        anonymous_tuple.AnonymousTuple([(None, vals),
+                                        (None, key.internal_representation)]),
+        computation_types.NamedTupleType((val_type, key.type_signature)))
 
-    return val_key_zips
+    vals_key_zipped = await self._zip(vals_key, placement, all_equal=False)
+
+    return vals_key_zipped.internal_representation
 
   async def _encrypt_client_tensors(self, arg, pk_a):
 
@@ -570,7 +566,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       val_type = arg.type_signature[0]
       val = arg.internal_representation[0]
 
-    val_key_zipped = await self._zip_val_key(val, pk_a)
+    val_key_zipped = await self._zip_val_key(val, pk_a,
+                                             placement_literals.CLIENTS)
 
     fed_ex = self.federating_executor
 
@@ -684,7 +681,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     aggregands = await asyncio.gather(
         *[self._move(v, item_type, aggr) for v in val])
 
-    aggregands_key_zipped = await self._zip_val_key(aggregands, sk_a)
+    aggregands_key_zipped = await self._zip_val_key(
+        aggregands, sk_a, placement_literals.AGGREGATORS)
 
     # Decrypt tensors moved to the server before applying reduce
     # In the future should be decrypted by the Trusted aggregator
