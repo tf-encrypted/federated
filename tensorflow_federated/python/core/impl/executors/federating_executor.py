@@ -523,10 +523,13 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _zip_val_key(self, vals, key, placement):
 
-    # zip values and keys EagerValues on each client using
-    # their respective eager executor.
-    val_type = computation_types.FederatedType(
-        vals[0].type_signature, placement, all_equal=False)
+    if isinstance(vals, list):
+      val_type = computation_types.FederatedType(
+          vals[0].type_signature, placement, all_equal=False)
+    else:
+      val_type = computation_types.FederatedType(
+          vals.type_signature, placement, all_equal=False)
+      vals = [vals]
 
     vals_key = FederatingExecutorValue(
         anonymous_tuple.AnonymousTuple([(None, vals),
@@ -681,15 +684,14 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     aggregands = await asyncio.gather(
         *[self._move(v, item_type, aggr) for v in val])
 
-    aggregands_key_zipped = await self._zip_val_key(
-        aggregands, sk_a, placement_literals.AGGREGATORS)
-
     # Decrypt tensors moved to the server before applying reduce
     # In the future should be decrypted by the Trusted aggregator
     aggregands_decrypted = []
-    for item in aggregands_key_zipped:
+    for item in aggregands:
+      item_key_zipped = await self._zip_val_key(item, sk_a,
+                                                placement_literals.AGGREGATORS)
       decrypted_tensor = await self._decrypt_tensors_on_aggregator(
-          [item], orig_clients_dtype)
+          item_key_zipped, orig_clients_dtype)
       aggregands_decrypted.append(decrypted_tensor.internal_representation[0])
 
     zero = await aggr.create_value(

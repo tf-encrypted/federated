@@ -960,6 +960,9 @@ class FederatingExecutorTest(parameterized.TestCase):
         self, comp, num_clients=3, intrinsic_strategy_fn=strategy)
     self.assertEqual(result.numpy(), 30)
 
+
+class FederatingExecutorTest(parameterized.TestCase):
+
   @parameterized.named_parameters(
       ('centralized', federating_executor.CentralizedIntrinsicStrategy),
       ('trusted_aggregator',
@@ -1303,7 +1306,8 @@ class EncryptionTest(parameterized.TestCase):
                        val_enc.type_signature.member, aggr))
 
     val_key_zipped = loop.run_until_complete(
-        strat_ex._zip_val_key([enc_val_on_aggr], sk_a))
+        strat_ex._zip_val_key([enc_val_on_aggr], sk_a,
+                              placement_literals.AGGREGATORS))
 
     val_dec = loop.run_until_complete(
         strat_ex._decrypt_tensors_on_aggregator(val_key_zipped, tf.float32))
