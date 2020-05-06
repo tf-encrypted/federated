@@ -119,8 +119,8 @@ class FederatingExecutorValue(executor_value_base.ExecutorValue):
 
 class IntrinsicStrategy(abc.ABC):
 
-  def __init__(self, federating_executor: FederatingExecutor):
-    self.federating_executor = federating_executor
+  def __init__(self, parent_executor):
+    self.executor = parent_executor
 
   @classmethod
   @abc.abstractmethod
@@ -128,7 +128,7 @@ class IntrinsicStrategy(abc.ABC):
     pass
 
   def _get_child_executors(self, placement, index=None):
-    child_executors = self.federating_executor._target_executors[placement]
+    child_executors = self.executor._target_executors[placement]
     if index is not None:
       return child_executors[index]
     return child_executors
@@ -229,8 +229,8 @@ class IntrinsicStrategy(abc.ABC):
 
 class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
-  def __init__(self, federating_executor):
-    super().__init__(federating_executor)
+  def __init__(self, parent_executor):
+    super().__init__(parent_executor)
 
   @classmethod
   def validate_executor_placements(cls, executor_placements):
@@ -254,11 +254,11 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
   async def federated_value_at_server(self, arg):
     return await executor_utils.compute_intrinsic_federated_value(
-        self, arg, placement_literals.SERVER)
+        self.executor, arg, placement_literals.SERVER)
 
   async def federated_value_at_clients(self, arg):
     return await executor_utils.compute_intrinsic_federated_value(
-        self, arg, placement_literals.CLIENTS)
+        self.executor, arg, placement_literals.CLIENTS)
 
   async def federated_eval_at_server(self, arg):
     return await self._eval(arg, placement_literals.SERVER, True)
@@ -315,7 +315,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     items = await asyncio.gather(*[_move(v) for v in val])
 
     zero = await child.create_value(
-        await (await self.federating_executor.create_selection(
+        await (await self.executor.create_selection(
             arg, index=1)).compute(), zero_type)
     op = await child.create_value(arg.internal_representation[2], op_type)
 
@@ -345,12 +345,11 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
 
     # TODO(b/134543154): Expand this implementation to take advantage of the
     # parallelism afforded by `merge`.
-    fed_ex = self.federating_executor
 
     val = arg.internal_representation[0]
     zero = arg.internal_representation[1]
     accumulate = arg.internal_representation[2]
-    pre_report = await fed_ex._compute_intrinsic_federated_reduce(
+    pre_report = await self.executor._compute_intrinsic_federated_reduce(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([(None, val), (None, zero),
                                             (None, accumulate)]),
@@ -363,7 +362,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
                                       report_type.parameter)
 
     report = arg.internal_representation[4]
-    return await fed_ex._compute_intrinsic_federated_apply(
+    return await self.executor._compute_intrinsic_federated_apply(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([
                 (None, report), (None, pre_report.internal_representation)
@@ -376,15 +375,15 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     zero, plus = tuple(await
                        asyncio.gather(*[
                            executor_utils.embed_tf_scalar_constant(
-                               self.federating_executor,
+                               self.executor,
                                arg.type_signature.member,
                                0),
                            executor_utils.embed_tf_binary_operator(
-                               self.federating_executor,
+                               self.executor,
                                arg.type_signature.member,
                                tf.add)
                        ]))
-    return await self.federating_executor._compute_intrinsic_federated_reduce(
+    return await self.executor._compute_intrinsic_federated_reduce(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([
                 (None, arg.internal_representation),
@@ -396,7 +395,7 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     )
 
   async def federated_mean(self, arg):
-    arg_sum = await self.federating_executor._compute_intrinsic_federated_sum(arg)
+    arg_sum = await self.executor._compute_intrinsic_federated_sum(arg)
     member_type = arg_sum.type_signature.member
     count = float(len(arg.internal_representation))
     if count < 1.0:
@@ -415,8 +414,8 @@ class CentralizedIntrinsicStrategy(IntrinsicStrategy):
     return FederatingExecutorValue([result], arg_sum.type_signature)
 
   async def federated_weighted_mean(self, arg):
-    return await executor_utils.compute_federated_weighted_mean(
-        self.federating_executor, arg)
+    return await executor_utils.compute_intrinsic_federated_weighted_mean(
+        self.executor, arg)
 
   async def federated_collect(self, arg):
     py_typecheck.check_type(arg.type_signature, computation_types.FederatedType)
@@ -898,8 +897,7 @@ class FederatingExecutor(executor_base.Executor):
 
   @tracing.trace
   async def _compute_intrinsic_federated_weighted_mean(self, arg):
-    return await executor_utils.compute_intrinsic_federated_weighted_mean(
-        self, arg)
+    return await self.intrinsic_strategy.federated_weighted_mean(arg)
 
   @tracing.trace
   async def _compute_intrinsic_federated_collect(self, arg):
