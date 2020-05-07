@@ -561,6 +561,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
           'found {}.'.format(len(arg.internal_representation)))
 
     # Encrypt client tensors
+    # NOTE it will be supplied to the intrinsic strategy
     secure_channel = SecureChannels()
     pk_a, sk_a = await secure_channel.setup(channel='clients-aggregators',
                                             executor=self)
@@ -1129,7 +1130,7 @@ class FederatingExecutor(executor_base.Executor):
   async def _compute_intrinsic_federated_secure_sum(self, arg):
     return await self.intrinsic_strategy.federated_secure_sum(arg)
 
-
+# NOTE Should it be called Channel instead?
 class SecureChannels:
   def __init__(self, channels_config=None):
 
