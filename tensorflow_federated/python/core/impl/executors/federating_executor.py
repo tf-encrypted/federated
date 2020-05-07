@@ -492,25 +492,6 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                 'Unsupported cardinality for placement "{}": {}.'.format(
                     pl, pl_cardinality))
 
-  async def _zip_val_key(self, vals, key, placement):
-
-    if isinstance(vals, list):
-      val_type = computation_types.FederatedType(
-          vals[0].type_signature, placement, all_equal=False)
-    else:
-      val_type = computation_types.FederatedType(
-          vals.type_signature, placement, all_equal=False)
-      vals = [vals]
-
-    vals_key = FederatingExecutorValue(
-        anonymous_tuple.AnonymousTuple([(None, vals),
-                                        (None, key.internal_representation)]),
-        computation_types.NamedTupleType((val_type, key.type_signature)))
-
-    vals_key_zipped = await self._zip(vals_key, placement, all_equal=False)
-
-    return vals_key_zipped.internal_representation
-
   async def federated_value_at_server(self, arg):
     return await self._place(arg, placement_literals.SERVER)
 
@@ -593,11 +574,10 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     # In the future should be decrypted by the Trusted aggregator
     aggregands_decrypted = []
     for item in aggregands:
-      item_key_zipped = await self._zip_val_key(item, sk_a,
-                                                placement_literals.AGGREGATORS)
       decrypted_tensor = await secure_channel.receive(channel='clients-aggregators',
                                                       executor=self,
-                                                      val=item_key_zipped,
+                                                      val=item,
+                                                      receiver_sk=sk_a,
                                                       receiver_dtype=orig_clients_dtype)
       aggregands_decrypted.append(decrypted_tensor.internal_representation[0])
 
@@ -1130,6 +1110,7 @@ class FederatingExecutor(executor_base.Executor):
   async def _compute_intrinsic_federated_secure_sum(self, arg):
     return await self.intrinsic_strategy.federated_secure_sum(arg)
 
+
 # NOTE Should it be called Channel instead?
 class SecureChannels:
   def __init__(self, channels_config=None):
@@ -1161,13 +1142,13 @@ class SecureChannels:
     return await _encrypt_sender_tensors(channel, executor, arg, pk_receiver)
 
 
-  async def receive(self, channel, executor, val, receiver_dtype):
+  async def receive(self, channel, executor, val, receiver_sk, receiver_dtype):
     encrypted = self.channels_config[channel]['encrypted']
 
     if not encrypted:
       return val
 
-    return await _decrypt_tensors_on_receiver(channel, executor, val, receiver_dtype)
+    return await _decrypt_tensors_on_receiver(channel, executor, val, receiver_sk, receiver_dtype)
 
 async def _receiver_generate_keys(channel, executor):
   # NOTE solve confusion between executor and receiver_executor
@@ -1275,14 +1256,16 @@ async def _encrypt_sender_tensors(channel, executor, arg, pk_rcv):
                                           (None, val_key_zipped)]),
           computation_types.NamedTupleType((fn_type, val_type))))
 
-async def _decrypt_tensors_on_receiver(channel, executor, val, receiver_dtype):
+async def _decrypt_tensors_on_receiver(channel, executor, val, receiver_sk, receiver_dtype):
   sender_placement, receiver_placement = _get_placements(channel)
 
-  client_output_type_signature = val[0].type_signature[0]
-  aggregator_public_key_type_signature = val[0].type_signature[1]
+  val = await _zip_val_key(executor, val, receiver_sk, receiver_placement)
 
-  @computations.tf_computation(client_output_type_signature,
-                                aggregator_public_key_type_signature)
+  sender_output_type_signature = val[0].type_signature[0]
+  receiver_public_key_type_signature = val[0].type_signature[1]
+
+  @computations.tf_computation(sender_output_type_signature,
+                                receiver_public_key_type_signature)
   def decrypt_tensor(client_outputs, sk_rcv):
 
     ciphertext = easy_box.Ciphertext(client_outputs[0])
