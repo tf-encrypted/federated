@@ -508,7 +508,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     py_typecheck.check_type(val_type, computation_types.FederatedType)
     item_type = val_type.member
-    
+
     val = await asyncio.gather(*[
         target_executor.create_value(await v.compute(), item_type) for v in val
     ])
@@ -517,7 +517,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
         channel.receive(
             parent_executor=parent_executor,
             val=v,
-            receiver_sk=sk_a,
+            sk_receiver=sk_a,
             sender_dtype=orig_clients_dtype) for v in val
     ])
     # NOTE should check if we can remove this step
@@ -1130,10 +1130,10 @@ class Channel:
     if not self.is_encrypted:
       return
 
-    receiver_pk, receiver_sk = await self._receiver_generate_keys(
+    pk_receiver, sk_receiver = await self._receiver_generate_keys(
         parent_executor)
 
-    return receiver_pk, receiver_sk
+    return pk_receiver, sk_receiver
 
   async def send(self, parent_executor, val, pk_receiver):
 
@@ -1142,13 +1142,13 @@ class Channel:
 
     return await self._encrypt_sender_tensors(parent_executor, val, pk_receiver)
 
-  async def receive(self, parent_executor, val, receiver_sk, sender_dtype):
+  async def receive(self, parent_executor, val, sk_receiver, sender_dtype):
 
     if not self.is_encrypted:
       return val
 
     return await self._decrypt_tensors_on_receiver(parent_executor, val,
-                                                   receiver_sk, sender_dtype)
+                                                   sk_receiver, sender_dtype)
 
   async def _receiver_generate_keys(self, parent_executor):
     # NOTE solve confusion between executor and receiver_executor
@@ -1245,9 +1245,9 @@ class Channel:
             computation_types.NamedTupleType((fn_type, val_type))))
 
   async def _decrypt_tensors_on_receiver(self, parent_executor, val,
-                                         receiver_sk, sender_dtype):
+                                         sk_rcv, sender_dtype):
 
-    val = await self._zip_val_key(parent_executor, val, receiver_sk,
+    val = await self._zip_val_key(parent_executor, val, sk_rcv,
                                   self.receiver_placement)
 
     sender_output_type_signature = val[0].type_signature[0]
