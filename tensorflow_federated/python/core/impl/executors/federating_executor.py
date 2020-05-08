@@ -493,17 +493,37 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                     pl, pl_cardinality))
 
   @classmethod
-  async def _move(cls, value, value_type, target_executor, parent_executor,
-                  sk_a, clients_dtype, channel):
-    val = await target_executor.create_value(await value.compute(), value_type)
+  async def _move(cls, arg, target_executor, parent_executor, channel):
 
-    received_val = await channel.receive(
-        parent_executor=parent_executor,
-        val=val,
-        receiver_sk=sk_a,
-        sender_dtype=clients_dtype)
+    pk_a, sk_a = await channel.setup(parent_executor=parent_executor)
 
-    return received_val.internal_representation[0]
+    enc_clients_arg = await channel.send(
+        parent_executor=parent_executor, val=arg, pk_receiver=pk_a)
+        
+    val_type = enc_clients_arg.type_signature
+    val = enc_clients_arg.internal_representation
+    orig_clients_dtype = arg.type_signature[0].member.dtype
+
+    py_typecheck.check_type(val, list)
+
+    py_typecheck.check_type(val_type, computation_types.FederatedType)
+    item_type = val_type.member
+    
+    val = await asyncio.gather(*[
+        target_executor.create_value(await v.compute(), item_type) for v in val
+    ])
+
+    received_vals = await asyncio.gather(*[
+        channel.receive(
+            parent_executor=parent_executor,
+            val=v,
+            receiver_sk=sk_a,
+            sender_dtype=orig_clients_dtype) for v in val
+    ])
+    # NOTE should check if we can remove this step
+    received_vals = [v.internal_representation[0] for v in received_vals]
+
+    return received_vals
 
   async def federated_value_at_server(self, arg):
     return await self._place(arg, placement_literals.SERVER)
@@ -554,35 +574,18 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
 
-    # Encrypt client tensors
     # NOTE it will be supplied to the intrinsic strategy
     agg_cls_channel = Channel(
         sender_placement=placement_literals.CLIENTS,
         receiver_placement=placement_literals.AGGREGATORS,
         is_encrypted=True)
 
-    pk_a, sk_a = await agg_cls_channel.setup(parent_executor=self)
-
-    enc_clients_arg = await agg_cls_channel.send(
-        parent_executor=self, val=arg, pk_receiver=pk_a)
-    val_type = enc_clients_arg.type_signature
-    val = enc_clients_arg.internal_representation
-    # Store original client dtype before encryption for
-    # future decryption
-    orig_clients_dtype = arg.type_signature[0].member.dtype
-
-    py_typecheck.check_type(val_type, computation_types.FederatedType)
-    item_type = val_type.member
     zero_type = arg.type_signature[1]
     op_type = arg.type_signature[2]
 
-    py_typecheck.check_type(val, list)
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
 
-    aggregands = await asyncio.gather(*[
-        self._move(v, item_type, aggr, self, sk_a, orig_clients_dtype,
-                   agg_cls_channel) for v in val
-    ])
+    aggregands = await self._move(arg, aggr, self, agg_cls_channel)
 
     zero = await aggr.create_value(
         await (await
@@ -1175,7 +1178,7 @@ class Channel:
 
     # NOTE: This broadcast should work from aggregator to clients
     # but also from server to aggregator (so server can receive
-    # final updates)
+    # final updates). May have to use  _place instead
     pk_fed_val = await parent_executor.federated_broadcast(pk_fed_val)
 
     return pk_fed_val, sk_fed_val
