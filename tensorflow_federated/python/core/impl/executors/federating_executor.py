@@ -461,6 +461,11 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
   def __init__(self, federating_executor):
     super().__init__(federating_executor)
 
+    self.channel = Channel(
+        sender_placement=placement_literals.CLIENTS,
+        receiver_placement=placement_literals.AGGREGATORS,
+        is_encrypted=True)
+
   @classmethod
   def validate_executor_placements(cls, executor_placements):
     singleton_placements = [
@@ -492,13 +497,12 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                 'Unsupported cardinality for placement "{}": {}.'.format(
                     pl, pl_cardinality))
 
-  @classmethod
-  async def _move(cls, arg, target_executor, parent_executor, channel):
+  async def _move(self, arg, target_executor, parent_executor):
 
-    pk_a, sk_a = await channel.setup(parent_executor=parent_executor)
+    await self.channel.setup(parent_executor=parent_executor)
 
-    enc_clients_arg = await channel.send(
-        parent_executor=parent_executor, val=arg, pk_receiver=pk_a)
+    enc_clients_arg = await self.channel.send(
+        parent_executor=parent_executor, val=arg)
         
     val_type = enc_clients_arg.type_signature
     val = enc_clients_arg.internal_representation
@@ -514,10 +518,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     ])
 
     received_vals = await asyncio.gather(*[
-        channel.receive(
+        self.channel.receive(
             parent_executor=parent_executor,
             val=v,
-            sk_receiver=sk_a,
             sender_dtype=orig_clients_dtype) for v in val
     ])
     # NOTE should check if we can remove this step
@@ -574,18 +577,12 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
 
-    # NOTE it will be supplied to the intrinsic strategy
-    agg_cls_channel = Channel(
-        sender_placement=placement_literals.CLIENTS,
-        receiver_placement=placement_literals.AGGREGATORS,
-        is_encrypted=True)
-
     zero_type = arg.type_signature[1]
     op_type = arg.type_signature[2]
 
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
 
-    aggregands = await self._move(arg, aggr, self, agg_cls_channel)
+    aggregands = await self._move(arg, aggr, self)
 
     zero = await aggr.create_value(
         await (await
@@ -1125,33 +1122,43 @@ class Channel:
     self.receiver_placement = receiver_placement
     self.is_encrypted = is_encrypted
 
+    self.pk_receiver = None
+    self.sk_receiver = None
+    self.pk_sender = None
+    self.sk_sender = None
+
+    self.key_store = KeyStore()
+
   async def setup(self, parent_executor):
 
     if not self.is_encrypted:
       return
 
-    pk_receiver, sk_receiver = await self._receiver_generate_keys(
+    self.pk_receiver, self.sk_receiver = await self._receiver_generate_keys(
         parent_executor)
 
-    return pk_receiver, sk_receiver
+    self.pk_sender, self.sk_sender = await self._sender_generate_keys(parent_executor)
 
-  async def send(self, parent_executor, val, pk_receiver):
+    self.key_store.add_keys(self.sender_placement, self.pk_sender, self.sk_sender)
+    self.key_store.add_keys(self.receiver_placement, self.pk_receiver, self.sk_receiver)
+    
+    return 
 
-    if not self.is_encrypted:
-      return val
-
-    return await self._encrypt_sender_tensors(parent_executor, val, pk_receiver)
-
-  async def receive(self, parent_executor, val, sk_receiver, sender_dtype):
+  async def send(self, parent_executor, val):
 
     if not self.is_encrypted:
       return val
 
-    return await self._decrypt_tensors_on_receiver(parent_executor, val,
-                                                   sk_receiver, sender_dtype)
+    return await self._encrypt_sender_tensors(parent_executor, val)
+
+  async def receive(self, parent_executor, val, sender_dtype):
+
+    if not self.is_encrypted:
+      return val
+
+    return await self._decrypt_tensors_on_receiver(parent_executor, val, sender_dtype)
 
   async def _receiver_generate_keys(self, parent_executor):
-    # NOTE solve confusion between executor and receiver_executor
 
     @computations.tf_computation()
     def generate_keys():
@@ -1183,7 +1190,42 @@ class Channel:
 
     return pk_fed_val, sk_fed_val
 
-  async def _zip_val_key(self, parent_executor, vals, key, placement):
+
+  async def _sender_generate_keys(self, parent_executor):
+
+    @computations.tf_computation()
+    def generate_keys():
+      pk, sk = easy_box.gen_keypair()
+      return pk.raw, sk.raw
+
+    fn_type = generate_keys.type_signature
+    fn = generate_keys._computation_proto
+
+    # sender_ex = parent_executor._get_child_executors(
+    #     self.sender_placement, index=0)
+
+    sender_ex = parent_executor._get_child_executors(self.sender_placement, index=0)
+
+    key_generator = await sender_ex.create_call(await
+                                                sender_ex.create_value(
+                                                    fn, fn_type))
+
+    keys = await asyncio.gather(*[
+        sender_ex.create_selection(key_generator, i)
+        for i in range(len(key_generator.type_signature))
+    ])
+
+    # pk_fed_val, sk_fed_val = await asyncio.gather(
+    #     *[parent_executor._place(k, self.sender_placement) for k in keys])
+
+    sk_fed_val = await parent_executor._place(keys[1], self.sender_placement)
+
+    pk_fed_val = await parent_executor._place(keys[0], self.receiver_placement)
+
+    return pk_fed_val, sk_fed_val
+
+  async def _zip_val_key(self, parent_executor, vals, pk_key, sk_key, placement):
+    # import pdb; pdb.set_trace()
 
     if isinstance(vals, list):
       val_type = computation_types.FederatedType(
@@ -1195,15 +1237,16 @@ class Channel:
 
     vals_key = FederatingExecutorValue(
         anonymous_tuple.AnonymousTuple([(None, vals),
-                                        (None, key.internal_representation)]),
-        computation_types.NamedTupleType((val_type, key.type_signature)))
+                                        (None, pk_key.internal_representation),
+                                        (None, sk_key.internal_representation)]),
+        computation_types.NamedTupleType((val_type, pk_key.type_signature, sk_key.type_signature)))
 
     vals_key_zipped = await parent_executor._zip(
         vals_key, placement, all_equal=False)
 
     return vals_key_zipped.internal_representation
 
-  async def _encrypt_sender_tensors(self, parent_executor, val, pk_rcv):
+  async def _encrypt_sender_tensors(self, parent_executor, val):
 
     nb_senders = len(
         parent_executor._get_child_executors(self.sender_placement))
@@ -1212,17 +1255,19 @@ class Channel:
       input_tensor_type = val.type_signature.member
     else:
       input_tensor_type = val.type_signature[0].member
-    pk_rcv_tensor_type = pk_rcv.type_signature.member
+    pk_rcv_tensor_type = self.pk_receiver.type_signature.member
+    sk_sender_tensor_type = self.sk_sender.type_signature.member
 
-    @computations.tf_computation(input_tensor_type, pk_rcv_tensor_type)
-    def encrypt_tensor(plaintext, pk_rcv):
+    @computations.tf_computation(input_tensor_type, pk_rcv_tensor_type, sk_sender_tensor_type)
+    def encrypt_tensor(plaintext, pk_rcv, sk_snd):
 
       pk_rcv = easy_box.PublicKey(pk_rcv)
-      pk_snd, sk_snd = easy_box.gen_keypair()
+      sk_snd = easy_box.PublicKey(sk_snd)
+
       nonce = easy_box.gen_nonce()
       ciphertext, mac = easy_box.seal_detached(plaintext, nonce, pk_rcv, sk_snd)
 
-      return ciphertext.raw, mac.raw, pk_snd.raw, nonce.raw
+      return ciphertext.raw, mac.raw, nonce.raw
 
     fn_type = encrypt_tensor.type_signature
     fn = encrypt_tensor._computation_proto
@@ -1232,9 +1277,10 @@ class Channel:
     else:
       val_type = val.type_signature[0]
       val = val.internal_representation[0]
-
-    val_key_zipped = await self._zip_val_key(parent_executor, val, pk_rcv,
+    
+    val_key_zipped = await self._zip_val_key(parent_executor, val, self.pk_receiver, self.sk_sender,
                                              self.sender_placement)
+
     # NOTE probably won't always be fed_ex in future design
     fed_ex = parent_executor.federating_executor
 
@@ -1244,24 +1290,25 @@ class Channel:
                                             (None, val_key_zipped)]),
             computation_types.NamedTupleType((fn_type, val_type))))
 
-  async def _decrypt_tensors_on_receiver(self, parent_executor, val,
-                                         sk_rcv, sender_dtype):
+  async def _decrypt_tensors_on_receiver(self, parent_executor, val, sender_dtype):
 
-    val = await self._zip_val_key(parent_executor, val, sk_rcv,
+    val = await self._zip_val_key(parent_executor, val, self.sk_receiver, self.pk_sender,
                                   self.receiver_placement)
 
     sender_output_type_signature = val[0].type_signature[0]
-    receiver_public_key_type_signature = val[0].type_signature[1]
+    receiver_secret_key_type_signature = val[0].type_signature[1]
+    sender_public_key_type_signature = val[0].type_signature[2]
 
     @computations.tf_computation(sender_output_type_signature,
-                                 receiver_public_key_type_signature)
-    def decrypt_tensor(client_outputs, sk_rcv):
+                                 receiver_secret_key_type_signature,
+                                 sender_public_key_type_signature)
+    def decrypt_tensor(client_outputs, sk_rcv, pk_snd):
 
       ciphertext = easy_box.Ciphertext(client_outputs[0])
       mac = easy_box.Mac(client_outputs[1])
-      pk_snd = easy_box.PublicKey(client_outputs[2])
-      nonce = easy_box.Nonce(client_outputs[3])
+      nonce = easy_box.Nonce(client_outputs[2])
       sk_rcv = easy_box.SecretKey(sk_rcv)
+      pk_snd = easy_box.PublicKey(pk_snd)
 
       plaintext_recovered = easy_box.open_detached(ciphertext, mac, nonce,
                                                    pk_snd, sk_rcv, sender_dtype)
@@ -1282,3 +1329,16 @@ class Channel:
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([(None, fn), (None, val)]),
             computation_types.NamedTupleType((fn_type, val_type))))
+
+
+class KeyStore:
+  def __init__(self):
+    self.key_store = {}
+
+  def add_keys(self, placement_name, pk, sk):
+    self.key_store[placement_name] = {}
+    self.key_store[placement_name]['pk'] = pk
+    self.key_store[placement_name]['sk'] = sk
+  
+  def get_keys(self, placement_name):
+    return self.key_store
