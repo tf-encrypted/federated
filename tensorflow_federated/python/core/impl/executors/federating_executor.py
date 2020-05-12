@@ -500,7 +500,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _move(self, arg, target_executor):
 
-    enc_clients_arg = await self.channel.send(val=arg)
+    enc_clients_arg = await self.channel.send(value=arg)
 
     val_type = enc_clients_arg.type_signature
     val = enc_clients_arg.internal_representation
@@ -514,7 +514,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     ])
 
     received_vals = await asyncio.gather(*[
-        self.channel.receive(val=v, sender_index=i) for (i, v) in enumerate(val)
+        self.channel.receive(value=v, sender_index=i) for (i, v) in enumerate(val)
     ])
 
     received_vals = [v.internal_representation[0] for v in received_vals]
@@ -1135,19 +1135,19 @@ class Channel:
 
     return
 
-  async def send(self, val, sender_index=0, receiver_index=0):
+  async def send(self, value, sender_index=0, receiver_index=0):
 
     if not self.is_encrypted:
-      return val
+      return value
 
-    return await self._encrypt_sender_tensors(val, sender_index, receiver_index)
+    return await self._encrypt_sender_tensors(value, sender_index, receiver_index)
 
-  async def receive(self, val, receiver_index=0, sender_index=0):
+  async def receive(self, value, receiver_index=0, sender_index=0):
 
     if not self.is_encrypted:
-      return val
+      return value
 
-    return await self._decrypt_tensors_on_receiver(val, sender_index,
+    return await self._decrypt_tensors_on_receiver(value, sender_index,
                                                    receiver_index)
 
   async def _generate_keys(self, key_owner_placement):
@@ -1171,13 +1171,13 @@ class Channel:
       key_generator = await executor.create_call(await executor.create_value(
           fn, fn_type))
 
-      keys = await asyncio.gather(*[
+      pk, sk = await asyncio.gather(*[
           executor.create_selection(key_generator, i)
           for i in range(len(key_generator.type_signature))
       ])
 
-      pk_vals.append(keys[0])
-      sk_vals.append(keys[1])
+      pk_vals.append(pk)
+      sk_vals.append(sk)
 
       self.key_store.add_keys(key_owner_placement.name, pk_vals, sk_vals)
 
