@@ -462,6 +462,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     super().__init__(federating_executor)
 
     self.channel = Channel(
+        parent_executor=self,
         sender_placement=placement_literals.CLIENTS,
         receiver_placement=placement_literals.AGGREGATORS,
         is_encrypted=True)
@@ -537,10 +538,9 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _move(self, arg, target_executor, parent_executor):
 
-    await self.channel.setup(parent_executor=parent_executor)
+    await self.channel.setup()
 
-    enc_clients_arg = await self.channel.send(
-        parent_executor=parent_executor, val=arg)
+    enc_clients_arg = await self.channel.send(val=arg)
 
     val_type = enc_clients_arg.type_signature
     val = enc_clients_arg.internal_representation
@@ -557,10 +557,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     received_vals = await asyncio.gather(*[
         self.channel.receive(
-            parent_executor=parent_executor,
-            val=v,
-            sender_dtype=orig_clients_dtype,
-            sender_index=i) for (i, v) in enumerate(val)
+            val=v, sender_dtype=orig_clients_dtype, sender_index=i)
+        for (i, v) in enumerate(val)
     ])
 
     received_vals = [v.internal_representation[0] for v in received_vals]
@@ -1155,50 +1153,46 @@ class FederatingExecutor(executor_base.Executor):
 
 class Channel:
 
-  def __init__(self, sender_placement, receiver_placement, is_encrypted):
+  def __init__(self, parent_executor, sender_placement, receiver_placement,
+               is_encrypted):
 
+    self.parent_executor = parent_executor
     self.sender_placement = sender_placement
     self.receiver_placement = receiver_placement
     self.is_encrypted = is_encrypted
 
-    self.pk_receiver = None
-    self.sk_receiver = None
-
     self.key_store = KeyStore()
 
-  async def setup(self, parent_executor):
+  async def setup(self):
 
     if not self.is_encrypted:
       return
 
-    await self._receiver_generate_keys(parent_executor)
-    await self._sender_generate_keys(parent_executor)
+    await self._generate_keys(self.sender_placement)
+    await self._generate_keys(self.receiver_placement)
+    await self._share_public_keys(self.sender_placement,
+                                  self.receiver_placement)
+    await self._share_public_keys(self.receiver_placement,
+                                  self.sender_placement)
 
     return
 
-  async def send(self, parent_executor, val, sender_index=0, receiver_index=0):
+  async def send(self, val, sender_index=0, receiver_index=0):
 
     if not self.is_encrypted:
       return val
 
-    return await self._encrypt_sender_tensors(parent_executor, val,
-                                              sender_index, receiver_index)
+    return await self._encrypt_sender_tensors(val, sender_index, receiver_index)
 
-  async def receive(self,
-                    parent_executor,
-                    val,
-                    sender_dtype,
-                    receiver_index=0,
-                    sender_index=0):
+  async def receive(self, val, sender_dtype, receiver_index=0, sender_index=0):
 
     if not self.is_encrypted:
       return val
 
-    return await self._decrypt_tensors_on_receiver(parent_executor, val,
-                                                   sender_dtype, sender_index,
-                                                   receiver_index)
+    return await self._decrypt_tensors_on_receiver(val, sender_dtype,
+                                                   sender_index, receiver_index)
 
-  async def _receiver_generate_keys(self, parent_executor):
+  async def _generate_keys(self, key_owner_placement):
 
     @computations.tf_computation()
     def generate_keys():
@@ -1208,72 +1202,43 @@ class Channel:
     fn_type = generate_keys.type_signature
     fn = generate_keys._computation_proto
 
-    receiver_ex = parent_executor._get_child_executors(
-        self.receiver_placement, index=0)
+    executors = self.parent_executor._get_child_executors(key_owner_placement)
 
-    key_generator = await receiver_ex.create_call(await
-                                                  receiver_ex.create_value(
-                                                      fn, fn_type))
+    nb_executors = len(executors)
 
-    keys = await asyncio.gather(*[
-        receiver_ex.create_selection(key_generator, i)
-        for i in range(len(key_generator.type_signature))
-    ])
-
-    # pk_fed_val, sk_fed_val = await asyncio.gather(
-    #     *[parent_executor._place_keys([k], self.receiver_placement) for k in keys])
-
-    # pk_fed_val = await parent_executor.federated_broadcast(pk_fed_val)
-
-    sk_fed_val = await parent_executor._place_keys([keys[1]],
-                                                   self.receiver_placement)
-    pk_fed_val = await parent_executor._place_keys([keys[0]],
-                                                   self.sender_placement)
-
-    self.key_store.add_keys(self.receiver_placement.name, pk_fed_val,
-                            sk_fed_val)
-
-    return
-
-  async def _sender_generate_keys(self, parent_executor):
-
-    @computations.tf_computation()
-    def generate_keys():
-      pk, sk = easy_box.gen_keypair()
-      return pk.raw, sk.raw
-
-    fn_type = generate_keys.type_signature
-    fn = generate_keys._computation_proto
-
-    senders_ex = parent_executor._get_child_executors(self.sender_placement)
-    nb_senders = len(senders_ex)
     sk_vals = []
     pk_vals = []
 
-    if nb_senders > 1:
-      for i in range(nb_senders):
-        sender_ex = senders_ex[0]
-        key_generator = await sender_ex.create_call(await
-                                                    sender_ex.create_value(
-                                                        fn, fn_type))
+    for i in range(nb_executors):
+      executor = executors[0]
+      key_generator = await executor.create_call(await executor.create_value(
+          fn, fn_type))
 
-        keys = await asyncio.gather(*[
-            sender_ex.create_selection(key_generator, i)
-            for i in range(len(key_generator.type_signature))
-        ])
-        sk_vals.append(keys[1])
-        pk_vals.append(keys[0])
+      keys = await asyncio.gather(*[
+          executor.create_selection(key_generator, i)
+          for i in range(len(key_generator.type_signature))
+      ])
 
-    sk_fed_val = await parent_executor._place_keys(sk_vals,
-                                                   self.sender_placement)
-    pk_fed_val = await parent_executor._place_keys(pk_vals,
-                                                   self.receiver_placement)
+      pk_vals.append(keys[0])
+      sk_vals.append(keys[1])
 
-    self.key_store.add_keys(self.sender_placement.name, pk_fed_val, sk_fed_val)
+      self.key_store.add_keys(key_owner_placement.name, pk_vals, sk_vals)
+
     return
 
+  async def _share_public_keys(self, key_owner_placement, send_public_keys_to):
+
+    keys = self.key_store.get_keys(key_owner_placement.name)
+
+    sk_fed_vals = await self.parent_executor._place_keys(
+        keys['sk'], key_owner_placement)
+    pk_fed_vals = await self.parent_executor._place_keys(
+        keys['pk'], send_public_keys_to)
+
+    self.key_store.update_keys(key_owner_placement.name, pk_fed_vals,
+                               sk_fed_vals)
+
   async def _zip_val_key(self,
-                         parent_executor,
                          vals,
                          pk_key,
                          sk_key,
@@ -1300,19 +1265,18 @@ class Channel:
         computation_types.NamedTupleType(
             (val_type, pk_key.type_signature, sk_key.type_signature)))
 
-    vals_key_zipped = await parent_executor._zip(
+    vals_key_zipped = await self.parent_executor._zip(
         vals_key, placement, all_equal=False)
 
     return vals_key_zipped.internal_representation
 
   async def _encrypt_sender_tensors(self,
-                                    parent_executor,
                                     val,
                                     sender_index=0,
                                     receiver_index=0):
 
     nb_senders = len(
-        parent_executor._get_child_executors(self.sender_placement))
+        self.parent_executor._get_child_executors(self.sender_placement))
 
     if nb_senders == 1:
       input_tensor_type = val.type_signature.member
@@ -1345,11 +1309,11 @@ class Channel:
       val_type = val.type_signature[0]
       val = val.internal_representation[0]
 
-    val_key_zipped = await self._zip_val_key(parent_executor, val, pk_receiver,
-                                             sk_sender, self.sender_placement)
+    val_key_zipped = await self._zip_val_key(val, pk_receiver, sk_sender,
+                                             self.sender_placement)
 
     # NOTE probably won't always be fed_ex in future design
-    fed_ex = parent_executor.federating_executor
+    fed_ex = self.parent_executor.federating_executor
 
     return await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
@@ -1358,7 +1322,6 @@ class Channel:
             computation_types.NamedTupleType((fn_type, val_type))))
 
   async def _decrypt_tensors_on_receiver(self,
-                                         parent_executor,
                                          val,
                                          sender_dtype,
                                          sender_index=0,
@@ -1368,7 +1331,6 @@ class Channel:
     sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
 
     val = await self._zip_val_key(
-        parent_executor,
         val,
         sk_receiver,
         pk_sender,
@@ -1403,7 +1365,7 @@ class Channel:
     fn_type = decrypt_tensor.type_signature
     fn = decrypt_tensor._computation_proto
     # NOTE probably won't always be fed_ex in future design
-    fed_ex = parent_executor.federating_executor
+    fed_ex = self.parent_executor.federating_executor
 
     return await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
@@ -1423,3 +1385,7 @@ class KeyStore:
 
   def get_keys(self, key_owner):
     return self.key_store[key_owner]
+
+  def update_keys(self, key_owner, pk, sk):
+    self.key_store[key_owner]['pk'] = pk
+    self.key_store[key_owner]['sk'] = sk
