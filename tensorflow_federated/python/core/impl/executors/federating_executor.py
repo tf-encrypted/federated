@@ -498,56 +498,14 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                 'Unsupported cardinality for placement "{}": {}.'.format(
                     pl, pl_cardinality))
 
-  @tracing.trace
-  async def _place_keys(self, keys, placement):
-
-    py_typecheck.check_type(placement, placement_literals.PlacementLiteral)
-    children = self._get_child_executors(placement)
-    # val = await arg.compute()
-    if not isinstance(children, list):
-      children = [children]
-
-    if len(keys) == len(children):
-      keys_type_signature = keys[0].type_signature
-      return FederatingExecutorValue(
-          await asyncio.gather(*[
-              c.create_value(await keys[i].compute(), keys_type_signature)
-              for (i, c) in enumerate(children)
-          ]),
-          computation_types.FederatedType(
-              keys_type_signature, placement, all_equal=False))
-    elif len(keys) > len(children):
-      keys_type_signature = keys[0].type_signature
-      child = children[0]
-      return FederatingExecutorValue(
-          await asyncio.gather(*[
-              child.create_value(await k.compute(), keys_type_signature)
-              for k in keys
-          ]),
-          computation_types.FederatedType(
-              keys_type_signature, placement, all_equal=False))
-    elif (len(keys) == 1) & (len(children) > 1):
-      keys_type_signature = keys[0].type_signature
-      return FederatingExecutorValue(
-          await asyncio.gather(*[
-              c.create_value(await keys[0].compute(), keys_type_signature)
-              for c in children
-          ]),
-          computation_types.FederatedType(
-              keys_type_signature, placement, all_equal=True))
-
-  async def _move(self, arg, target_executor, parent_executor):
-
-    await self.channel.setup()
+  async def _move(self, arg, target_executor):
 
     enc_clients_arg = await self.channel.send(val=arg)
 
     val_type = enc_clients_arg.type_signature
     val = enc_clients_arg.internal_representation
     orig_clients_dtype = arg.type_signature[0].member.dtype
-
     py_typecheck.check_type(val, list)
-
     py_typecheck.check_type(val_type, computation_types.FederatedType)
     item_type = val_type.member
 
@@ -556,9 +514,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     ])
 
     received_vals = await asyncio.gather(*[
-        self.channel.receive(
-            val=v, sender_dtype=orig_clients_dtype, sender_index=i)
-        for (i, v) in enumerate(val)
+        self.channel.receive(val=v, sender_index=i) for (i, v) in enumerate(val)
     ])
 
     received_vals = [v.internal_representation[0] for v in received_vals]
@@ -614,12 +570,14 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
 
-    zero_type = arg.type_signature[1]
-    op_type = arg.type_signature[2]
+    # Setup channel keys
+    await self.channel.setup()
 
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
+    aggregands = await self._move(arg, aggr)
 
-    aggregands = await self._move(arg, aggr, self)
+    zero_type = arg.type_signature[1]
+    op_type = arg.type_signature[2]
 
     zero = await aggr.create_value(
         await (await
@@ -1184,13 +1142,13 @@ class Channel:
 
     return await self._encrypt_sender_tensors(val, sender_index, receiver_index)
 
-  async def receive(self, val, sender_dtype, receiver_index=0, sender_index=0):
+  async def receive(self, val, receiver_index=0, sender_index=0):
 
     if not self.is_encrypted:
       return val
 
-    return await self._decrypt_tensors_on_receiver(val, sender_dtype,
-                                                   sender_index, receiver_index)
+    return await self._decrypt_tensors_on_receiver(val, sender_index,
+                                                   receiver_index)
 
   async def _generate_keys(self, key_owner_placement):
 
@@ -1205,7 +1163,6 @@ class Channel:
     executors = self.parent_executor._get_child_executors(key_owner_placement)
 
     nb_executors = len(executors)
-
     sk_vals = []
     pk_vals = []
 
@@ -1230,9 +1187,9 @@ class Channel:
 
     keys = self.key_store.get_keys(key_owner_placement.name)
 
-    sk_fed_vals = await self.parent_executor._place_keys(
+    sk_fed_vals = await self._place_keys(
         keys['sk'], key_owner_placement)
-    pk_fed_vals = await self.parent_executor._place_keys(
+    pk_fed_vals = await self._place_keys(
         keys['pk'], send_public_keys_to)
 
     self.key_store.update_keys(key_owner_placement.name, pk_fed_vals,
@@ -1270,6 +1227,48 @@ class Channel:
 
     return vals_key_zipped.internal_representation
 
+  async def _place_keys(self, keys, placement):
+
+    py_typecheck.check_type(placement, placement_literals.PlacementLiteral)
+    children = self.parent_executor._get_child_executors(placement)
+
+    # Scenario: there are as many keys as exectutors. For example
+    # there are 3 clients and each should have a secret key
+    if len(keys) == len(children):
+      keys_type_signature = keys[0].type_signature
+      return FederatingExecutorValue(
+          await asyncio.gather(*[
+              c.create_value(await keys[i].compute(), keys_type_signature)
+              for (i, c) in enumerate(children)
+          ]),
+          computation_types.FederatedType(
+              keys_type_signature, placement, all_equal=False))
+    # Scenario: there are more keys than exectutors. For example
+    # there are 3 clients and each have a public key. Each client wants
+    # to share its key to the same aggregator.
+    elif (len(children)==1) & (len(children) < len(keys)):
+      keys_type_signature = keys[0].type_signature
+      child = children[0]
+      return FederatingExecutorValue(
+          await asyncio.gather(*[
+              child.create_value(await k.compute(), keys_type_signature)
+              for k in keys
+          ]),
+          computation_types.FederatedType(
+              keys_type_signature, placement, all_equal=False))
+    # Scenario: there are more exectutors than keys. For example
+    # there is an aggregator with one public key. The aggregator
+    # wants to share the samer public key to 3 different clients.
+    elif (len(keys) == 1) & (len(children) > len(keys)):
+      keys_type_signature = keys[0].type_signature
+      return FederatingExecutorValue(
+          await asyncio.gather(*[
+              c.create_value(await keys[0].compute(), keys_type_signature)
+              for c in children
+          ]),
+          computation_types.FederatedType(
+              keys_type_signature, placement, all_equal=True))
+
   async def _encrypt_sender_tensors(self,
                                     val,
                                     sender_index=0,
@@ -1280,8 +1279,11 @@ class Channel:
 
     if nb_senders == 1:
       input_tensor_type = val.type_signature.member
+      self.orig_sender_tensor_dtype = input_tensor_type.dtype
+      orig_clients_dtype = arg.type_signature[0].member.dtype
     else:
       input_tensor_type = val.type_signature[0].member
+      self.orig_sender_tensor_dtype = input_tensor_type.dtype
 
     pk_receiver = self.key_store.get_keys(self.receiver_placement.name)['pk']
     sk_sender = self.key_store.get_keys(self.sender_placement.name)['sk']
@@ -1323,7 +1325,6 @@ class Channel:
 
   async def _decrypt_tensors_on_receiver(self,
                                          val,
-                                         sender_dtype,
                                          sender_index=0,
                                          receive_index=0):
 
@@ -1352,13 +1353,13 @@ class Channel:
       sk_rcv = easy_box.SecretKey(sk_rcv)
       pk_snd = easy_box.PublicKey(pk_snd)
 
-      plaintext_recovered = easy_box.open_detached(ciphertext, mac, nonce,
-                                                   pk_snd, sk_rcv, sender_dtype)
+      plaintext_recovered = easy_box.open_detached(
+          ciphertext, mac, nonce, pk_snd, sk_rcv, self.orig_sender_tensor_dtype)
 
       return plaintext_recovered
 
     val_type = computation_types.FederatedType(
-        computation_types.TensorType(sender_dtype),
+        computation_types.TensorType(self.orig_sender_tensor_dtype),
         self.receiver_placement,
         all_equal=False)
 
