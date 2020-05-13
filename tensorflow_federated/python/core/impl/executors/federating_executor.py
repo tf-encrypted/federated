@@ -501,11 +501,11 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _move(self, arg, target_executor):
 
-    enc_clients_arg = await self.channel.send(
+    enc_clients_vals = await self.channel.send(
         value=arg.internal_representation[0])
 
-    val_type = enc_clients_arg.type_signature
-    val = enc_clients_arg.internal_representation
+    val_type = enc_clients_vals.type_signature
+    val = enc_clients_vals.internal_representation
     py_typecheck.check_type(val, list)
     py_typecheck.check_type(val_type, computation_types.FederatedType)
     item_type = val_type.member
@@ -1135,7 +1135,7 @@ class EasyBoxChannel(base_channel.Channel):
     await self._share_public_keys(self.receiver_placement,
                                   self.sender_placement)
 
-  async def send(self, value, sender_index=0, receiver_index=0):
+  async def send(self, value, sender_index=None, receiver_index=None):
 
     if not self.is_encrypted:
       return value
@@ -1143,7 +1143,7 @@ class EasyBoxChannel(base_channel.Channel):
     return await self._encrypt_sender_tensors(value, sender_index,
                                               receiver_index)
 
-  async def receive(self, value, receiver_index=0, sender_index=0):
+  async def receive(self, value, receiver_index=None, sender_index=None):
 
     if not self.is_encrypted:
       return value
@@ -1193,12 +1193,124 @@ class EasyBoxChannel(base_channel.Channel):
 
     self.key_store.update_keys(key_owner.name, pk_fed_vals, sk_fed_vals)
 
+  async def _encrypt_sender_tensors(self,
+                                    val,
+                                    sender_index=None,
+                                    receiver_index=None):
+
+    nb_senders = len(
+        self.parent_executor._get_child_executors(self.sender_placement))
+
+    if nb_senders == 1:
+      input_tensor_type = val.type_signature
+      self.orig_sender_tensor_dtype = input_tensor_type.dtype
+    else:
+      input_tensor_type = val[0].type_signature
+      self.orig_sender_tensor_dtype = input_tensor_type.dtype
+
+    pk_receiver = self.key_store.get_keys(self.receiver_placement.name)['pk']
+    sk_sender = self.key_store.get_keys(self.sender_placement.name)['sk']
+    pk_rcv_tensor_type = pk_receiver.type_signature.member
+    sk_sender_tensor_type = sk_sender.type_signature.member
+
+    @computations.tf_computation(input_tensor_type, pk_rcv_tensor_type,
+                                 sk_sender_tensor_type)
+    def encrypt_tensor(plaintext, pk_rcv, sk_snd):
+
+      pk_rcv = easy_box.PublicKey(pk_rcv)
+      sk_snd = easy_box.PublicKey(sk_snd)
+
+      nonce = easy_box.gen_nonce()
+      ciphertext, mac = easy_box.seal_detached(plaintext, nonce, pk_rcv, sk_snd)
+
+      return ciphertext.raw, mac.raw, nonce.raw
+
+    fn_type = encrypt_tensor.type_signature
+    fn = encrypt_tensor._computation_proto
+    if nb_senders == 1:
+      val_type = val.type_signature
+      val = val.internal_representation
+    else:
+      tensor_type = val[0].type_signature
+
+    val_type = computation_types.FederatedType(
+        tensor_type, self.sender_placement, all_equal=False)
+
+    val_key_zipped = await self._zip_val_key(
+        self.sender_placement,
+        val,
+        pk_receiver,
+        sk_sender,
+        pk_index=receiver_index,
+        sk_index=sender_index)
+
+    # NOTE probably won't always be fed_ex in future design
+    fed_ex = self.parent_executor.federating_executor
+
+    return await fed_ex._compute_intrinsic_federated_map(
+        FederatingExecutorValue(
+            anonymous_tuple.AnonymousTuple([(None, fn),
+                                            (None, val_key_zipped)]),
+            computation_types.NamedTupleType((fn_type, val_type))))
+
+  async def _decrypt_tensors_on_receiver(self,
+                                         val,
+                                         sender_index=0,
+                                         receiver_index=0):
+
+    pk_sender = self.key_store.get_keys(self.sender_placement.name)['pk']
+    sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
+
+    val = await self._zip_val_key(
+        self.receiver_placement,
+        val,
+        pk_sender,
+        sk_receiver,
+        pk_index=sender_index,
+        sk_index=receiver_index)
+
+    sender_output_type_signature = val[0].type_signature[0]
+    receiver_secret_key_type_signature = val[0].type_signature[1]
+    sender_public_key_type_signature = val[0].type_signature[2]
+
+    @computations.tf_computation(sender_output_type_signature,
+                                 sender_public_key_type_signature,
+                                 receiver_secret_key_type_signature)
+    def decrypt_tensor(client_outputs, pk_snd, sk_rcv):
+
+      ciphertext = easy_box.Ciphertext(client_outputs[0])
+      mac = easy_box.Mac(client_outputs[1])
+      nonce = easy_box.Nonce(client_outputs[2])
+      sk_rcv = easy_box.SecretKey(sk_rcv)
+      pk_snd = easy_box.PublicKey(pk_snd)
+
+      plaintext_recovered = easy_box.open_detached(
+          ciphertext, mac, nonce, pk_snd, sk_rcv, self.orig_sender_tensor_dtype)
+
+      return plaintext_recovered
+
+    val_type = computation_types.FederatedType(
+        computation_types.TensorType(self.orig_sender_tensor_dtype),
+        self.receiver_placement,
+        all_equal=False)
+
+    fn_type = decrypt_tensor.type_signature
+    fn = decrypt_tensor._computation_proto
+    # NOTE probably won't always be fed_ex in future design
+    fed_ex = self.parent_executor.federating_executor
+
+    return await fed_ex._compute_intrinsic_federated_map(
+        FederatingExecutorValue(
+            anonymous_tuple.AnonymousTuple([(None, fn), (None, val)]),
+            computation_types.NamedTupleType((fn_type, val_type))))
+
   async def _zip_val_key(self,
+                         placement,
                          vals,
                          pk_key,
                          sk_key,
-                         placement,
-                         sender_index=None):
+                         pk_index=None,
+                         sk_index=None):
 
     if isinstance(vals, list):
       val_type = computation_types.FederatedType(
@@ -1211,8 +1323,11 @@ class EasyBoxChannel(base_channel.Channel):
     pk_key_vals = pk_key.internal_representation
     sk_key_vals = sk_key.internal_representation
 
-    if sender_index != None:
-      sk_key_vals = [sk_key_vals[sender_index]]
+    if pk_index != None:
+      pk_key_vals = [pk_key_vals[pk_index]]
+
+    if sk_index != None:
+      sk_key_vals = [sk_key_vals[sk_index]]
 
     vals_key = FederatingExecutorValue(
         anonymous_tuple.AnonymousTuple([(None, vals), (None, pk_key_vals),
@@ -1266,111 +1381,6 @@ class EasyBoxChannel(base_channel.Channel):
           ]),
           computation_types.FederatedType(
               keys_type_signature, placement, all_equal=True))
-
-  async def _encrypt_sender_tensors(self,
-                                    val,
-                                    sender_index=0,
-                                    receiver_index=0):
-
-    nb_senders = len(
-        self.parent_executor._get_child_executors(self.sender_placement))
-
-    if nb_senders == 1:
-      input_tensor_type = val.type_signature
-      self.orig_sender_tensor_dtype = input_tensor_type.dtype
-    else:
-      input_tensor_type = val[0].type_signature
-      self.orig_sender_tensor_dtype = input_tensor_type.dtype
-
-    pk_receiver = self.key_store.get_keys(self.receiver_placement.name)['pk']
-    sk_sender = self.key_store.get_keys(self.sender_placement.name)['sk']
-    pk_rcv_tensor_type = pk_receiver.type_signature.member
-    sk_sender_tensor_type = sk_sender.type_signature.member
-
-    @computations.tf_computation(input_tensor_type, pk_rcv_tensor_type,
-                                 sk_sender_tensor_type)
-    def encrypt_tensor(plaintext, pk_rcv, sk_snd):
-
-      pk_rcv = easy_box.PublicKey(pk_rcv)
-      sk_snd = easy_box.PublicKey(sk_snd)
-
-      nonce = easy_box.gen_nonce()
-      ciphertext, mac = easy_box.seal_detached(plaintext, nonce, pk_rcv, sk_snd)
-
-      return ciphertext.raw, mac.raw, nonce.raw
-
-    fn_type = encrypt_tensor.type_signature
-    fn = encrypt_tensor._computation_proto
-    if nb_senders == 1:
-      val_type = val.type_signature
-      val = val.internal_representation
-    else:
-      tensor_type = val[0].type_signature
-
-    val_type = computation_types.FederatedType(
-        tensor_type, self.sender_placement, all_equal=False)
-
-    val_key_zipped = await self._zip_val_key(val, pk_receiver, sk_sender,
-                                             self.sender_placement)
-
-    # NOTE probably won't always be fed_ex in future design
-    fed_ex = self.parent_executor.federating_executor
-
-    return await fed_ex._compute_intrinsic_federated_map(
-        FederatingExecutorValue(
-            anonymous_tuple.AnonymousTuple([(None, fn),
-                                            (None, val_key_zipped)]),
-            computation_types.NamedTupleType((fn_type, val_type))))
-
-  async def _decrypt_tensors_on_receiver(self,
-                                         val,
-                                         sender_index=0,
-                                         receive_index=0):
-
-    pk_sender = self.key_store.get_keys(self.sender_placement.name)['pk']
-    sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
-
-    val = await self._zip_val_key(
-        val,
-        sk_receiver,
-        pk_sender,
-        self.receiver_placement,
-        sender_index=sender_index)
-
-    sender_output_type_signature = val[0].type_signature[0]
-    receiver_secret_key_type_signature = val[0].type_signature[1]
-    sender_public_key_type_signature = val[0].type_signature[2]
-
-    @computations.tf_computation(sender_output_type_signature,
-                                 receiver_secret_key_type_signature,
-                                 sender_public_key_type_signature)
-    def decrypt_tensor(client_outputs, sk_rcv, pk_snd):
-
-      ciphertext = easy_box.Ciphertext(client_outputs[0])
-      mac = easy_box.Mac(client_outputs[1])
-      nonce = easy_box.Nonce(client_outputs[2])
-      sk_rcv = easy_box.SecretKey(sk_rcv)
-      pk_snd = easy_box.PublicKey(pk_snd)
-
-      plaintext_recovered = easy_box.open_detached(
-          ciphertext, mac, nonce, pk_snd, sk_rcv, self.orig_sender_tensor_dtype)
-
-      return plaintext_recovered
-
-    val_type = computation_types.FederatedType(
-        computation_types.TensorType(self.orig_sender_tensor_dtype),
-        self.receiver_placement,
-        all_equal=False)
-
-    fn_type = decrypt_tensor.type_signature
-    fn = decrypt_tensor._computation_proto
-    # NOTE probably won't always be fed_ex in future design
-    fed_ex = self.parent_executor.federating_executor
-
-    return await fed_ex._compute_intrinsic_federated_map(
-        FederatingExecutorValue(
-            anonymous_tuple.AnonymousTuple([(None, fn), (None, val)]),
-            computation_types.NamedTupleType((fn_type, val_type))))
 
 
 class KeyStore:

@@ -4,11 +4,11 @@ import abc
 class Channel(metaclass=abc.ABCMeta):
 
   @abc.abstractmethod
-  async def send(self, value, sender_index=0, receiver_index=0):
+  async def send(self, value, sender_index=None, receiver_index=None):
     pass
 
   @abc.abstractmethod
-  async def receive(self, value, receiver_index=0, sender_index=0):
+  async def receive(self, value, sender_index=None, receiver_index=None):
     pass
 
   @abc.abstractmethod
