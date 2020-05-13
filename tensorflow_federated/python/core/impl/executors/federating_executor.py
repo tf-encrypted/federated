@@ -501,11 +501,11 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _move(self, arg, target_executor):
 
-    enc_clients_arg = await self.channel.send(value=arg)
+    enc_clients_arg = await self.channel.send(
+        value=arg.internal_representation[0])
 
     val_type = enc_clients_arg.type_signature
     val = enc_clients_arg.internal_representation
-    orig_clients_dtype = arg.type_signature[0].member.dtype
     py_typecheck.check_type(val, list)
     py_typecheck.check_type(val_type, computation_types.FederatedType)
     item_type = val_type.member
@@ -1276,11 +1276,10 @@ class EasyBoxChannel(base_channel.Channel):
         self.parent_executor._get_child_executors(self.sender_placement))
 
     if nb_senders == 1:
-      input_tensor_type = val.type_signature.member
+      input_tensor_type = val.type_signature
       self.orig_sender_tensor_dtype = input_tensor_type.dtype
-      orig_clients_dtype = arg.type_signature[0].member.dtype
     else:
-      input_tensor_type = val.type_signature[0].member
+      input_tensor_type = val[0].type_signature
       self.orig_sender_tensor_dtype = input_tensor_type.dtype
 
     pk_receiver = self.key_store.get_keys(self.receiver_placement.name)['pk']
@@ -1306,8 +1305,10 @@ class EasyBoxChannel(base_channel.Channel):
       val_type = val.type_signature
       val = val.internal_representation
     else:
-      val_type = val.type_signature[0]
-      val = val.internal_representation[0]
+      tensor_type = val[0].type_signature
+
+    val_type = computation_types.FederatedType(
+        tensor_type, self.sender_placement, all_equal=False)
 
     val_key_zipped = await self._zip_val_key(val, pk_receiver, sk_sender,
                                              self.sender_placement)
