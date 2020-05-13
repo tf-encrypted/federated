@@ -422,7 +422,7 @@ py_library(
     srcs = ["federating_executor.py"],
     srcs_version = "PY3",
     deps = [
-        ":base_channel",
+        ":channel_base",
         ":executor_base",
         ":executor_utils",
         ":executor_value_base",
@@ -441,8 +441,8 @@ py_library(
 )
 
 py_library(
-    name = "base_channel",
-    srcs = ["base_channel.py"],
+    name = "channel_base",
+    srcs = ["channel_base.py"],
     srcs_version = "PY3",
 )
 

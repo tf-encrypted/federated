@@ -36,7 +36,7 @@ from tensorflow_federated.python.core.impl.executors import executor_base
 from tensorflow_federated.python.core.impl.executors import executor_utils
 from tensorflow_federated.python.core.impl.executors import executor_value_base
 
-from tensorflow_federated.python.core.impl.executors import base_channel
+from tensorflow_federated.python.core.impl.executors import channel_base
 from tf_encrypted.primitives.sodium import easy_box
 
 
@@ -465,8 +465,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     self.channel = EasyBoxChannel(
         parent_executor=self,
         sender_placement=placement_literals.CLIENTS,
-        receiver_placement=placement_literals.AGGREGATORS,
-        is_encrypted=True)
+        receiver_placement=placement_literals.AGGREGATORS)
 
   @classmethod
   def validate_executor_placements(cls, executor_placements):
@@ -1111,22 +1110,17 @@ class FederatingExecutor(executor_base.Executor):
     return await self.intrinsic_strategy.federated_secure_sum(arg)
 
 
-class EasyBoxChannel(base_channel.Channel):
+class EasyBoxChannel(channel_base.Channel):
 
-  def __init__(self, parent_executor, sender_placement, receiver_placement,
-               is_encrypted):
+  def __init__(self, parent_executor, sender_placement, receiver_placement):
 
     self.parent_executor = parent_executor
     self.sender_placement = sender_placement
     self.receiver_placement = receiver_placement
-    self.is_encrypted = is_encrypted
 
     self.key_store = KeyStore()
 
   async def setup(self):
-
-    if not self.is_encrypted:
-      return
 
     await self._generate_keys(self.sender_placement)
     await self._generate_keys(self.receiver_placement)
@@ -1137,18 +1131,12 @@ class EasyBoxChannel(base_channel.Channel):
 
   async def send(self, value, sender_index=None, receiver_index=None):
 
-    if not self.is_encrypted:
-      return value
-
-    return await self._encrypt_sender_tensors(value, sender_index,
+    return await self._encrypt_values_on_sender(value, sender_index,
                                               receiver_index)
 
   async def receive(self, value, receiver_index=None, sender_index=None):
 
-    if not self.is_encrypted:
-      return value
-
-    return await self._decrypt_tensors_on_receiver(value, sender_index,
+    return await self._decrypt_values_on_receiver(value, sender_index,
                                                    receiver_index)
 
   async def _generate_keys(self, key_owner):
@@ -1193,7 +1181,7 @@ class EasyBoxChannel(base_channel.Channel):
 
     self.key_store.update_keys(key_owner.name, pk_fed_vals, sk_fed_vals)
 
-  async def _encrypt_sender_tensors(self,
+  async def _encrypt_values_on_sender(self,
                                     val,
                                     sender_index=None,
                                     receiver_index=None):
@@ -1253,7 +1241,7 @@ class EasyBoxChannel(base_channel.Channel):
                                             (None, val_key_zipped)]),
             computation_types.NamedTupleType((fn_type, val_type))))
 
-  async def _decrypt_tensors_on_receiver(self,
+  async def _decrypt_values_on_receiver(self,
                                          val,
                                          sender_index=0,
                                          receiver_index=0):
