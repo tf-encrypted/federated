@@ -15,10 +15,3 @@ class Channel(metaclass=abc.ABCMeta):
   async def setup(self):
     pass
 
-  @abc.abstractmethod
-  async def _generate_keys(self, key_owner):
-    pass
-
-  @abc.abstractmethod
-  async def _share_public_keys(self, key_owner, send_pks_to):
-    pass
