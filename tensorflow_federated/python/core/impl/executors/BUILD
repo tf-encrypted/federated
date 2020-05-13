@@ -422,6 +422,7 @@ py_library(
     srcs = ["federating_executor.py"],
     srcs_version = "PY3",
     deps = [
+        ":base_channel",
         ":executor_base",
         ":executor_utils",
         ":executor_value_base",
@@ -437,6 +438,12 @@ py_library(
         "//tensorflow_federated/python/core/impl/compiler:type_factory",
         "//tensorflow_federated/python/core/impl/compiler:type_serialization",
     ],
+)
+
+py_library(
+    name = "base_channel",
+    srcs = ["base_channel.py"],
+    srcs_version = "PY3",
 )
 
 py_test(

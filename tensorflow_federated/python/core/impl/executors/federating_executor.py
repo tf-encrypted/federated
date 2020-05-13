@@ -36,6 +36,7 @@ from tensorflow_federated.python.core.impl.executors import executor_base
 from tensorflow_federated.python.core.impl.executors import executor_utils
 from tensorflow_federated.python.core.impl.executors import executor_value_base
 
+from tensorflow_federated.python.core.impl.executors import base_channel
 from tf_encrypted.primitives.sodium import easy_box
 
 
@@ -461,7 +462,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
   def __init__(self, federating_executor):
     super().__init__(federating_executor)
 
-    self.channel = Channel(
+    self.channel = EasyBoxChannel(
         parent_executor=self,
         sender_placement=placement_literals.CLIENTS,
         receiver_placement=placement_literals.AGGREGATORS,
@@ -514,7 +515,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     ])
 
     received_vals = await asyncio.gather(*[
-        self.channel.receive(value=v, sender_index=i) for (i, v) in enumerate(val)
+        self.channel.receive(value=v, sender_index=i)
+        for (i, v) in enumerate(val)
     ])
 
     received_vals = [v.internal_representation[0] for v in received_vals]
@@ -1109,7 +1111,7 @@ class FederatingExecutor(executor_base.Executor):
     return await self.intrinsic_strategy.federated_secure_sum(arg)
 
 
-class Channel:
+class EasyBoxChannel(base_channel.Channel):
 
   def __init__(self, parent_executor, sender_placement, receiver_placement,
                is_encrypted):
@@ -1133,14 +1135,13 @@ class Channel:
     await self._share_public_keys(self.receiver_placement,
                                   self.sender_placement)
 
-    return
-
   async def send(self, value, sender_index=0, receiver_index=0):
 
     if not self.is_encrypted:
       return value
 
-    return await self._encrypt_sender_tensors(value, sender_index, receiver_index)
+    return await self._encrypt_sender_tensors(value, sender_index,
+                                              receiver_index)
 
   async def receive(self, value, receiver_index=0, sender_index=0):
 
@@ -1150,7 +1151,7 @@ class Channel:
     return await self._decrypt_tensors_on_receiver(value, sender_index,
                                                    receiver_index)
 
-  async def _generate_keys(self, key_owner_placement):
+  async def _generate_keys(self, key_owner):
 
     @computations.tf_computation()
     def generate_keys():
@@ -1160,7 +1161,7 @@ class Channel:
     fn_type = generate_keys.type_signature
     fn = generate_keys._computation_proto
 
-    executors = self.parent_executor._get_child_executors(key_owner_placement)
+    executors = self.parent_executor._get_child_executors(key_owner)
 
     nb_executors = len(executors)
     sk_vals = []
@@ -1179,21 +1180,18 @@ class Channel:
       pk_vals.append(pk)
       sk_vals.append(sk)
 
-      self.key_store.add_keys(key_owner_placement.name, pk_vals, sk_vals)
+      self.key_store.add_keys(key_owner.name, pk_vals, sk_vals)
 
     return
 
-  async def _share_public_keys(self, key_owner_placement, send_public_keys_to):
+  async def _share_public_keys(self, key_owner, send_pks_to):
 
-    keys = self.key_store.get_keys(key_owner_placement.name)
+    keys = self.key_store.get_keys(key_owner.name)
 
-    sk_fed_vals = await self._place_keys(
-        keys['sk'], key_owner_placement)
-    pk_fed_vals = await self._place_keys(
-        keys['pk'], send_public_keys_to)
+    sk_fed_vals = await self._place_keys(keys['sk'], key_owner)
+    pk_fed_vals = await self._place_keys(keys['pk'], send_pks_to)
 
-    self.key_store.update_keys(key_owner_placement.name, pk_fed_vals,
-                               sk_fed_vals)
+    self.key_store.update_keys(key_owner.name, pk_fed_vals, sk_fed_vals)
 
   async def _zip_val_key(self,
                          vals,
@@ -1246,7 +1244,7 @@ class Channel:
     # Scenario: there are more keys than exectutors. For example
     # there are 3 clients and each have a public key. Each client wants
     # to share its key to the same aggregator.
-    elif (len(children)==1) & (len(children) < len(keys)):
+    elif (len(children) == 1) & (len(children) < len(keys)):
       keys_type_signature = keys[0].type_signature
       child = children[0]
       return FederatingExecutorValue(
