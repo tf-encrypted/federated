@@ -500,6 +500,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
   async def _move(self, arg, target_executor):
 
+    await self.channel.setup()
+
     enc_clients_vals = await self.channel.send(
         value=arg.internal_representation[0])
 
@@ -570,9 +572,6 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       raise ValueError(
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
-
-    # Setup channel keys
-    await self.channel.setup()
 
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
     aggregands = await self._move(arg, aggr)
@@ -1119,25 +1118,29 @@ class EasyBoxChannel(channel_base.Channel):
     self.receiver_placement = receiver_placement
 
     self.key_store = KeyStore()
+    self._is_channel_setup = False
 
   async def setup(self):
 
-    await self._generate_keys(self.sender_placement)
-    await self._generate_keys(self.receiver_placement)
-    await self._share_public_keys(self.sender_placement,
-                                  self.receiver_placement)
-    await self._share_public_keys(self.receiver_placement,
-                                  self.sender_placement)
+    if not self._is_channel_setup:
+      await self._generate_keys(self.sender_placement)
+      await self._generate_keys(self.receiver_placement)
+      await self._share_public_keys(self.sender_placement,
+                                    self.receiver_placement)
+      await self._share_public_keys(self.receiver_placement,
+                                    self.sender_placement)
+
+      self._is_channel_setup = True
 
   async def send(self, value, sender_index=None, receiver_index=None):
 
     return await self._encrypt_values_on_sender(value, sender_index,
-                                              receiver_index)
+                                                receiver_index)
 
   async def receive(self, value, receiver_index=None, sender_index=None):
 
     return await self._decrypt_values_on_receiver(value, sender_index,
-                                                   receiver_index)
+                                                  receiver_index)
 
   async def _generate_keys(self, key_owner):
 
@@ -1182,9 +1185,9 @@ class EasyBoxChannel(channel_base.Channel):
     self.key_store.update_keys(key_owner.name, pk_fed_vals, sk_fed_vals)
 
   async def _encrypt_values_on_sender(self,
-                                    val,
-                                    sender_index=None,
-                                    receiver_index=None):
+                                      val,
+                                      sender_index=None,
+                                      receiver_index=None):
 
     nb_senders = len(
         self.parent_executor._get_child_executors(self.sender_placement))
@@ -1242,9 +1245,9 @@ class EasyBoxChannel(channel_base.Channel):
             computation_types.NamedTupleType((fn_type, val_type))))
 
   async def _decrypt_values_on_receiver(self,
-                                         val,
-                                         sender_index=0,
-                                         receiver_index=0):
+                                        val,
+                                        sender_index=0,
+                                        receiver_index=0):
 
     pk_sender = self.key_store.get_keys(self.sender_placement.name)['pk']
     sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
