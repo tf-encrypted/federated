@@ -462,10 +462,13 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
   def __init__(self, federating_executor):
     super().__init__(federating_executor)
 
-    self.channel = EasyBoxChannel(
-        parent_executor=self,
-        sender_placement=placement_literals.CLIENTS,
-        receiver_placement=placement_literals.AGGREGATORS)
+    self.channel_grid = channel_base.ChannelGrid({
+        (placement_literals.AGGREGATORS, placement_literals.CLIENTS):
+            EasyBoxChannel(
+                parent_executor=self,
+                sender_placement=placement_literals.CLIENTS,
+                receiver_placement=placement_literals.AGGREGATORS)
+    })
 
   @classmethod
   def validate_executor_placements(cls, executor_placements):
@@ -498,12 +501,15 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
                 'Unsupported cardinality for placement "{}": {}.'.format(
                     pl, pl_cardinality))
 
-  async def _move(self, arg, target_executor):
+  async def _move(self, arg, source_placement, target_placement):
 
-    await self.channel.setup()
+    target_executor = self._get_child_executors(target_placement, index=0)
 
-    enc_clients_vals = await self.channel.send(
-        value=arg.internal_representation[0])
+    channel = self.channel_grid[(source_placement, target_placement)]
+
+    await channel.setup()
+
+    enc_clients_vals = await channel.send(value=arg.internal_representation[0])
 
     val_type = enc_clients_vals.type_signature
     val = enc_clients_vals.internal_representation
@@ -516,7 +522,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
     ])
 
     received_vals = await asyncio.gather(
-        *[self.channel.receive(value=v, sender=i) for (i, v) in enumerate(val)])
+        *[channel.receive(value=v, sender=i) for (i, v) in enumerate(val)])
 
     received_vals = [v.internal_representation[0] for v in received_vals]
 
@@ -572,7 +578,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
           'found {}.'.format(len(arg.internal_representation)))
 
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
-    aggregands = await self._move(arg, aggr)
+    aggregands = await self._move(arg, placement_literals.CLIENTS,
+                                  placement_literals.AGGREGATORS)
 
     zero_type = arg.type_signature[1]
     op_type = arg.type_signature[2]
