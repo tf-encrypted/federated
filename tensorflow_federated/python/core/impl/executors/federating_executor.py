@@ -1158,15 +1158,12 @@ class EasyBoxChannel(channel_base.Channel):
     sk_vals = []
     pk_vals = []
 
-    for i in range(nb_executors):
-      executor = executors[i]
+    for executor in executors:
       key_generator = await executor.create_call(await executor.create_value(
           fn, fn_type))
 
-      pk, sk = await asyncio.gather(*[
-          executor.create_selection(key_generator, i)
-          for i in range(len(key_generator.type_signature))
-      ])
+      pk = await executor.create_selection(key_generator, 0)
+      sk = await executor.create_selection(key_generator, 1)
 
       pk_vals.append(pk)
       sk_vals.append(sk)
@@ -1176,8 +1173,6 @@ class EasyBoxChannel(channel_base.Channel):
     sk_fed_vals = await self._place_keys(sk_vals, key_owner)
 
     self.key_store.add_keys(key_owner.name, pk_vals, sk_fed_vals)
-
-    return
 
   async def _share_public_keys(self, key_owner, send_pks_to):
 
@@ -1382,9 +1377,7 @@ class KeyStore:
     self.key_store = {}
 
   def add_keys(self, key_owner, pk, sk):
-    self.key_store[key_owner] = {}
-    self.key_store[key_owner]['pk'] = pk
-    self.key_store[key_owner]['sk'] = sk
+    self.key_store[key_owner] = {'pk': pk, 'sk': sk}
 
   def get_keys(self, key_owner):
     return self.key_store[key_owner]
