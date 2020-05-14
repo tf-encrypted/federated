@@ -1162,7 +1162,7 @@ class EasyBoxChannel(channel_base.Channel):
     pk_vals = []
 
     for i in range(nb_executors):
-      executor = executors[0]
+      executor = executors[i]
       key_generator = await executor.create_call(await executor.create_value(
           fn, fn_type))
 
