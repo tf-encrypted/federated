@@ -515,10 +515,8 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
         target_executor.create_value(await v.compute(), item_type) for v in val
     ])
 
-    received_vals = await asyncio.gather(*[
-        self.channel.receive(value=v, sender_index=i)
-        for (i, v) in enumerate(val)
-    ])
+    received_vals = await asyncio.gather(
+        *[self.channel.receive(value=v, sender=i) for (i, v) in enumerate(val)])
 
     received_vals = [v.internal_representation[0] for v in received_vals]
 
@@ -1132,15 +1130,13 @@ class EasyBoxChannel(channel_base.Channel):
 
       self._is_channel_setup = True
 
-  async def send(self, value, sender_index=None, receiver_index=None):
+  async def send(self, value, sender=None, receiver=None):
 
-    return await self._encrypt_values_on_sender(value, sender_index,
-                                                receiver_index)
+    return await self._encrypt_values_on_sender(value, sender, receiver)
 
-  async def receive(self, value, receiver_index=None, sender_index=None):
+  async def receive(self, value, receiver=None, sender=None):
 
-    return await self._decrypt_values_on_receiver(value, sender_index,
-                                                  receiver_index)
+    return await self._decrypt_values_on_receiver(value, sender, receiver)
 
   async def _generate_keys(self, key_owner):
 
@@ -1184,10 +1180,7 @@ class EasyBoxChannel(channel_base.Channel):
 
     self.key_store.update_keys(key_owner.name, pk_fed_vals, sk_fed_vals)
 
-  async def _encrypt_values_on_sender(self,
-                                      val,
-                                      sender_index=None,
-                                      receiver_index=None):
+  async def _encrypt_values_on_sender(self, val, sender=None, receiver=None):
 
     nb_senders = len(
         self.parent_executor._get_child_executors(self.sender_placement))
@@ -1232,8 +1225,8 @@ class EasyBoxChannel(channel_base.Channel):
         val,
         pk_receiver,
         sk_sender,
-        pk_index=receiver_index,
-        sk_index=sender_index)
+        pk_index=receiver,
+        sk_index=sender)
 
     # NOTE probably won't always be fed_ex in future design
     fed_ex = self.parent_executor.federating_executor
@@ -1244,10 +1237,7 @@ class EasyBoxChannel(channel_base.Channel):
                                             (None, val_key_zipped)]),
             computation_types.NamedTupleType((fn_type, val_type))))
 
-  async def _decrypt_values_on_receiver(self,
-                                        val,
-                                        sender_index=0,
-                                        receiver_index=0):
+  async def _decrypt_values_on_receiver(self, val, sender=0, receiver=0):
 
     pk_sender = self.key_store.get_keys(self.sender_placement.name)['pk']
     sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
@@ -1257,8 +1247,8 @@ class EasyBoxChannel(channel_base.Channel):
         val,
         pk_sender,
         sk_receiver,
-        pk_index=sender_index,
-        sk_index=receiver_index)
+        pk_index=sender,
+        sk_index=receiver)
 
     sender_output_type_signature = val[0].type_signature[0]
     receiver_secret_key_type_signature = val[0].type_signature[1]
