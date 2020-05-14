@@ -1174,7 +1174,11 @@ class EasyBoxChannel(channel_base.Channel):
       pk_vals.append(pk)
       sk_vals.append(sk)
 
-    self.key_store.add_keys(key_owner.name, pk_vals, sk_vals)
+    # Store list of EagerValue created by executor.create_call
+    # in a FederatingExecutorValue with the key onwer placement
+    sk_fed_vals = await self._place_keys(sk_vals, key_owner)
+
+    self.key_store.add_keys(key_owner.name, pk_vals, sk_fed_vals)
 
     return
 
@@ -1182,10 +1186,9 @@ class EasyBoxChannel(channel_base.Channel):
 
     keys = self.key_store.get_keys(key_owner.name)
 
-    sk_fed_vals = await self._place_keys(keys['sk'], key_owner)
     pk_fed_vals = await self._place_keys(keys['pk'], send_pks_to)
 
-    self.key_store.update_keys(key_owner.name, pk_fed_vals, sk_fed_vals)
+    self.key_store.update_keys(key_owner.name, pk_fed_vals)
 
   async def _encrypt_values_on_sender(self, val, sender=None, receiver=None):
 
@@ -1384,6 +1387,8 @@ class KeyStore:
   def get_keys(self, key_owner):
     return self.key_store[key_owner]
 
-  def update_keys(self, key_owner, pk, sk):
-    self.key_store[key_owner]['pk'] = pk
-    self.key_store[key_owner]['sk'] = sk
+  def update_keys(self, key_owner, pk=None, sk=None):
+    if pk:
+      self.key_store[key_owner]['pk'] = pk
+    if sk:
+      self.key_store[key_owner]['sk'] = sk
