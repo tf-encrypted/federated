@@ -1122,6 +1122,9 @@ class EasyBoxChannel(channel_base.Channel):
     self.key_references = KeyStore()
     self._is_channel_setup = False
 
+    self._encrypt_tensor_fn = None
+    self._decrypt_tensor_fn = None
+
   async def setup(self):
 
     if not self._is_channel_setup:
@@ -1201,23 +1204,16 @@ class EasyBoxChannel(channel_base.Channel):
     pk_receiver = self.key_references.get_public_key(
         self.receiver_placement.name)
     sk_sender = self.key_references.get_secret_key(self.sender_placement.name)
-    pk_rcv_tensor_type = pk_receiver.type_signature.member
-    sk_sender_tensor_type = sk_sender.type_signature.member
+    pk_rcv_type = pk_receiver.type_signature.member
+    sk_snd_type = sk_sender.type_signature.member
 
-    @computations.tf_computation(input_tensor_type, pk_rcv_tensor_type,
-                                 sk_sender_tensor_type)
-    def encrypt_tensor(plaintext, pk_rcv, sk_snd):
+    if not self._encrypt_tensor_fn:
+      self._encrypt_tensor_fn = self._encrypt_tensor(input_tensor_type,
+                                                     pk_rcv_type, sk_snd_type)
 
-      pk_rcv = easy_box.PublicKey(pk_rcv)
-      sk_snd = easy_box.PublicKey(sk_snd)
+    fn_type = self._encrypt_tensor_fn.type_signature
+    fn = self._encrypt_tensor_fn._computation_proto
 
-      nonce = easy_box.gen_nonce()
-      ciphertext, mac = easy_box.seal_detached(plaintext, nonce, pk_rcv, sk_snd)
-
-      return ciphertext.raw, mac.raw, nonce.raw
-
-    fn_type = encrypt_tensor.type_signature
-    fn = encrypt_tensor._computation_proto
     if nb_senders == 1:
       val_type = val.type_signature
       val = val.internal_representation
@@ -1263,33 +1259,23 @@ class EasyBoxChannel(channel_base.Channel):
         pk_index=sender,
         sk_index=receiver)
 
-    sender_output_type_signature = val[0].type_signature[0]
-    receiver_secret_key_type_signature = val[0].type_signature[1]
-    sender_public_key_type_signature = val[0].type_signature[2]
+    sender_values_type = val[0].type_signature[0]
+    pk_snd_type = val[0].type_signature[1]
+    sk_snd_type = val[0].type_signature[2]
 
-    @computations.tf_computation(sender_output_type_signature,
-                                 sender_public_key_type_signature,
-                                 receiver_secret_key_type_signature)
-    def decrypt_tensor(client_outputs, pk_snd, sk_rcv):
+    if not self._decrypt_tensor_fn:
+      self._decrypt_tensor_fn = self._decrypt_tensor(
+          sender_values_type, pk_snd_type, sk_snd_type,
+          self.orig_sender_tensor_dtype)
 
-      ciphertext = easy_box.Ciphertext(client_outputs[0])
-      mac = easy_box.Mac(client_outputs[1])
-      nonce = easy_box.Nonce(client_outputs[2])
-      sk_rcv = easy_box.SecretKey(sk_rcv)
-      pk_snd = easy_box.PublicKey(pk_snd)
-
-      plaintext_recovered = easy_box.open_detached(
-          ciphertext, mac, nonce, pk_snd, sk_rcv, self.orig_sender_tensor_dtype)
-
-      return plaintext_recovered
+    fn_type = self._decrypt_tensor_fn.type_signature
+    fn = self._decrypt_tensor_fn._computation_proto
 
     val_type = computation_types.FederatedType(
         computation_types.TensorType(self.orig_sender_tensor_dtype),
         self.receiver_placement,
         all_equal=False)
 
-    fn_type = decrypt_tensor.type_signature
-    fn = decrypt_tensor._computation_proto
     # NOTE probably won't always be fed_ex in future design
     fed_ex = self.parent_executor.federating_executor
 
@@ -1302,6 +1288,41 @@ class EasyBoxChannel(channel_base.Channel):
       return val_decrypted.internal_representation[0]
     else:
       return val_decrypted.internal_representation
+
+  def _encrypt_tensor(self, plaintext_type, pk_rcv_type, sk_snd_type):
+
+    @computations.tf_computation(plaintext_type, pk_rcv_type, sk_snd_type)
+    def encrypt_tensor(plaintext, pk_rcv, sk_snd):
+
+      pk_rcv = easy_box.PublicKey(pk_rcv)
+      sk_snd = easy_box.PublicKey(sk_snd)
+
+      nonce = easy_box.gen_nonce()
+      ciphertext, mac = easy_box.seal_detached(plaintext, nonce, pk_rcv, sk_snd)
+
+      return ciphertext.raw, mac.raw, nonce.raw
+
+    return encrypt_tensor
+
+  def _decrypt_tensor(self, sender_values_type, pk_snd_type, sk_rcv_snd,
+                      orig_sender_tensor_dtype):
+
+    @computations.tf_computation(sender_values_type, pk_snd_type, sk_rcv_snd)
+    def decrypt_tensor(sender_values, pk_snd, sk_rcv):
+
+      ciphertext = easy_box.Ciphertext(sender_values[0])
+      mac = easy_box.Mac(sender_values[1])
+      nonce = easy_box.Nonce(sender_values[2])
+      sk_rcv = easy_box.SecretKey(sk_rcv)
+      pk_snd = easy_box.PublicKey(pk_snd)
+
+      plaintext_recovered = easy_box.open_detached(ciphertext, mac, nonce,
+                                                   pk_snd, sk_rcv,
+                                                   orig_sender_tensor_dtype)
+
+      return plaintext_recovered
+
+    return decrypt_tensor
 
   async def _zip_val_key(self,
                          placement,
