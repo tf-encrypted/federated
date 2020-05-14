@@ -573,7 +573,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       raise ValueError(
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
-    
+
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
     aggregands = await self._move(arg, placement_literals.CLIENTS,
                                   placement_literals.AGGREGATORS)
@@ -1119,18 +1119,22 @@ class EasyBoxChannel(channel_base.Channel):
     self.sender_placement = sender_placement
     self.receiver_placement = receiver_placement
 
-    self.key_store = KeyStore()
+    self.key_references = KeyStore()
     self._is_channel_setup = False
 
   async def setup(self):
 
     if not self._is_channel_setup:
-      await self._generate_keys(self.sender_placement)
-      await self._generate_keys(self.receiver_placement)
-      await self._share_public_keys(self.sender_placement,
-                                    self.receiver_placement)
-      await self._share_public_keys(self.receiver_placement,
-                                    self.sender_placement)
+      await asyncio.gather(*[
+          self._generate_keys(self.sender_placement),
+          self._generate_keys(self.receiver_placement)
+      ])
+      await asyncio.gather(*[
+          self._share_public_keys(self.sender_placement,
+                                  self.receiver_placement),
+          self._share_public_keys(self.receiver_placement,
+                                  self.sender_placement)
+      ])
 
       self._is_channel_setup = True
 
@@ -1172,15 +1176,15 @@ class EasyBoxChannel(channel_base.Channel):
     # in a FederatingExecutorValue with the key onwer placement
     sk_fed_vals = await self._place_keys(sk_vals, key_owner)
 
-    self.key_store.add_keys(key_owner.name, pk_vals, sk_fed_vals)
+    self.key_references.add_keys(key_owner.name, pk_vals, sk_fed_vals)
 
   async def _share_public_keys(self, key_owner, send_pks_to):
 
-    keys = self.key_store.get_keys(key_owner.name)
+    pk = self.key_references.get_public_key(key_owner.name)
 
-    pk_fed_vals = await self._place_keys(keys['pk'], send_pks_to)
+    pk_fed_vals = await self._place_keys(pk, send_pks_to)
 
-    self.key_store.update_keys(key_owner.name, pk_fed_vals)
+    self.key_references.update_keys(key_owner.name, pk_fed_vals)
 
   async def _encrypt_values_on_sender(self, val, sender=None, receiver=None):
 
@@ -1194,8 +1198,9 @@ class EasyBoxChannel(channel_base.Channel):
       input_tensor_type = val[0].type_signature
       self.orig_sender_tensor_dtype = input_tensor_type.dtype
 
-    pk_receiver = self.key_store.get_keys(self.receiver_placement.name)['pk']
-    sk_sender = self.key_store.get_keys(self.sender_placement.name)['sk']
+    pk_receiver = self.key_references.get_public_key(
+        self.receiver_placement.name)
+    sk_sender = self.key_references.get_secret_key(self.sender_placement.name)
     pk_rcv_tensor_type = pk_receiver.type_signature.member
     sk_sender_tensor_type = sk_sender.type_signature.member
 
@@ -1241,8 +1246,9 @@ class EasyBoxChannel(channel_base.Channel):
 
   async def _decrypt_values_on_receiver(self, val, sender=None, receiver=None):
 
-    pk_sender = self.key_store.get_keys(self.sender_placement.name)['pk']
-    sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
+    pk_sender = self.key_references.get_public_key(self.sender_placement.name)
+    sk_receiver = self.key_references.get_secret_key(
+        self.receiver_placement.name)
 
     val = await self._zip_val_key(
         self.receiver_placement,
@@ -1287,7 +1293,7 @@ class EasyBoxChannel(channel_base.Channel):
             anonymous_tuple.AnonymousTuple([(None, fn), (None, val)]),
             computation_types.NamedTupleType((fn_type, val_type))))
 
-    if sender!=None or receiver!=None:
+    if sender != None or receiver != None:
       return val_decrypted.internal_representation[0]
     else:
       return val_decrypted.internal_representation
@@ -1379,8 +1385,11 @@ class KeyStore:
   def add_keys(self, key_owner, pk, sk):
     self.key_store[key_owner] = {'pk': pk, 'sk': sk}
 
-  def get_keys(self, key_owner):
-    return self.key_store[key_owner]
+  def get_public_key(self, key_owner):
+    return self.key_store[key_owner]['pk']
+
+  def get_secret_key(self, key_owner):
+    return self.key_store[key_owner]['sk']
 
   def update_keys(self, key_owner, pk=None, sk=None):
     if pk:
