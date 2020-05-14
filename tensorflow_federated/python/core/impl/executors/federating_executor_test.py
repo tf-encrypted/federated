@@ -40,6 +40,8 @@ from tensorflow_federated.python.core.impl.executors import executor_test_utils
 from tensorflow_federated.python.core.impl.executors import federating_executor
 from tensorflow_federated.python.core.impl.executors import reference_resolving_executor
 
+from tensorflow_federated.python.core.impl.executors import channel_base
+
 tf.compat.v1.enable_v2_behavior()
 
 
@@ -1272,49 +1274,69 @@ class IntrinsicStrategyTest(parameterized.TestCase):
       create_test_executor(intrinsic_strategy_fn=MockIntrinsicStrategy)
 
 
-# class EncryptionTest(parameterized.TestCase):
+class EncryptionTest(parameterized.TestCase):
 
-#   def test_generate_aggregator_keys(self):
-#     strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
-#     loop, ex = _make_test_runtime(intrinsic_strategy_fn=strategy)
-#     generate_keys = ex.intrinsic_strategy._trusted_aggregator_generate_keys()
-#     pk, sk = loop.run_until_complete(generate_keys)
+  def test_generate_aggregator_keys(self):
+    strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
+    loop, ex = _make_test_runtime(intrinsic_strategy_fn=strategy)
+    strat_ex = ex.intrinsic_strategy
 
-#     self.assertEqual(str(pk.type_signature), 'uint8[32]@CLIENTS')
-#     self.assertEqual(str(sk.type_signature), 'uint8[32]@AGGREGATORS')
+    channel_grid = channel_base.ChannelGrid({
+        (placement_literals.AGGREGATORS, placement_literals.CLIENTS):
+            federating_executor.EasyBoxChannel(
+                parent_executor=strat_ex,
+                sender_placement=placement_literals.CLIENTS,
+                receiver_placement=placement_literals.AGGREGATORS)
+    })
 
-#   def test_encryption_decryption(self):
+    channel = channel_grid[(placement_literals.CLIENTS,
+                            placement_literals.AGGREGATORS)]
+    loop.run_until_complete(channel.setup())
+    key_references = channel.key_references
 
-#     strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
-#     loop, ex = _make_test_runtime(intrinsic_strategy_fn=strategy)
-#     strat_ex = ex.intrinsic_strategy
+    pk_c = key_references.get_public_key(placement_literals.CLIENTS.name)
+    sk_c = key_references.get_secret_key(placement_literals.CLIENTS.name)
+    pk_a = key_references.get_public_key(placement_literals.AGGREGATORS.name)
+    sk_a = key_references.get_secret_key(placement_literals.AGGREGATORS.name)
 
-#     pk_a, sk_a = loop.run_until_complete(
-#         strat_ex._trusted_aggregator_generate_keys())
+    self.assertEqual(str(pk_c.type_signature), '{uint8[32]}@AGGREGATORS')
+    self.assertEqual(str(sk_c.type_signature), '{uint8[32]}@CLIENTS')
+    self.assertEqual(str(pk_a.type_signature), '{uint8[32]}@CLIENTS')
+    self.assertEqual(str(sk_a.type_signature), '{uint8[32]}@AGGREGATORS')
 
-#     val = loop.run_until_complete(
-#         ex.create_value([2.0], type_factory.at_clients(tf.float32)))
+  # def test_encryption_decryption(self):
 
-#     val_enc = loop.run_until_complete(
-#         strat_ex._encrypt_client_tensors(val, pk_a))
+  #   strategy = federating_executor.TrustedAggregatorIntrinsicStrategy
+  #   loop, ex = _make_test_runtime(intrinsic_strategy_fn=strategy)
+  #   strat_ex = ex.intrinsic_strategy
 
-#     aggr = strat_ex._get_child_executors(
-#         placement_literals.AGGREGATORS, index=0)
+  #   pk_a, sk_a = loop.run_until_complete(
+  #       strat_ex._trusted_aggregator_generate_keys())
 
-#     enc_val_on_aggr = loop.run_until_complete(
-#         strat_ex._move(val_enc.internal_representation[0],
-#                        val_enc.type_signature.member, aggr))
+  #   val = loop.run_until_complete(
+  #       ex.create_value([2.0], type_factory.at_clients(tf.float32)))
 
-#     val_key_zipped = loop.run_until_complete(
-#         strat_ex._zip_val_key([enc_val_on_aggr], sk_a,
-#                               placement_literals.AGGREGATORS))
+  #   val_enc = loop.run_until_complete(
+  #       strat_ex._encrypt_client_tensors(val, pk_a))
 
-#     val_dec = loop.run_until_complete(
-#         strat_ex._decrypt_tensors_on_aggregator(val_key_zipped, tf.float32))
+  #   aggr = strat_ex._get_child_executors(
+  #       placement_literals.AGGREGATORS, index=0)
 
-#     dec_tf_tensor = val_dec.internal_representation[0].internal_representation
+  #   enc_val_on_aggr = loop.run_until_complete(
+  #       strat_ex._move(val_enc.internal_representation[0],
+  #                      val_enc.type_signature.member, aggr))
 
-#     self.assertEqual(dec_tf_tensor, tf.constant(2.0, dtype=tf.float32))
+  #   val_key_zipped = loop.run_until_complete(
+  #       strat_ex._zip_val_key([enc_val_on_aggr], sk_a,
+  #                             placement_literals.AGGREGATORS))
+
+  #   val_dec = loop.run_until_complete(
+  #       strat_ex._decrypt_tensors_on_aggregator(val_key_zipped, tf.float32))
+
+  #   dec_tf_tensor = val_dec.internal_representation[0].internal_representation
+
+  #   self.assertEqual(dec_tf_tensor, tf.constant(2.0, dtype=tf.float32))
+
 
 if __name__ == '__main__':
   absltest.main()
