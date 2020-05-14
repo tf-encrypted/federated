@@ -576,7 +576,7 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
       raise ValueError(
           'Expected 3 elements in the `federated_reduce()` argument tuple, '
           'found {}.'.format(len(arg.internal_representation)))
-
+    
     aggr = self._get_child_executors(placement_literals.AGGREGATORS, index=0)
     aggregands = await self._move(arg, placement_literals.CLIENTS,
                                   placement_literals.AGGREGATORS)
@@ -1174,7 +1174,7 @@ class EasyBoxChannel(channel_base.Channel):
       pk_vals.append(pk)
       sk_vals.append(sk)
 
-      self.key_store.add_keys(key_owner.name, pk_vals, sk_vals)
+    self.key_store.add_keys(key_owner.name, pk_vals, sk_vals)
 
     return
 
