@@ -1215,8 +1215,7 @@ class EasyBoxChannel(channel_base.Channel):
     fn = self._encrypt_tensor_fn._computation_proto
 
     if nb_senders == 1:
-      val_type = val.type_signature
-      val = val.internal_representation
+      tensor_type = val.type_signature
     else:
       tensor_type = val[0].type_signature
 
