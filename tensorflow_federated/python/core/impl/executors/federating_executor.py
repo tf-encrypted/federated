@@ -504,7 +504,6 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
   async def _move(self, arg, source_placement, target_placement):
 
     target_executor = self._get_child_executors(target_placement, index=0)
-
     channel = self.channel_grid[(source_placement, target_placement)]
 
     await channel.setup()
@@ -523,8 +522,6 @@ class TrustedAggregatorIntrinsicStrategy(IntrinsicStrategy):
 
     received_vals = await asyncio.gather(
         *[channel.receive(value=v, sender=i) for (i, v) in enumerate(val)])
-
-    received_vals = [v.internal_representation[0] for v in received_vals]
 
     return received_vals
 
@@ -1247,7 +1244,7 @@ class EasyBoxChannel(channel_base.Channel):
                                             (None, val_key_zipped)]),
             computation_types.NamedTupleType((fn_type, val_type))))
 
-  async def _decrypt_values_on_receiver(self, val, sender=0, receiver=0):
+  async def _decrypt_values_on_receiver(self, val, sender=None, receiver=None):
 
     pk_sender = self.key_store.get_keys(self.sender_placement.name)['pk']
     sk_receiver = self.key_store.get_keys(self.receiver_placement.name)['sk']
@@ -1290,10 +1287,15 @@ class EasyBoxChannel(channel_base.Channel):
     # NOTE probably won't always be fed_ex in future design
     fed_ex = self.parent_executor.federating_executor
 
-    return await fed_ex._compute_intrinsic_federated_map(
+    val_decrypted = await fed_ex._compute_intrinsic_federated_map(
         FederatingExecutorValue(
             anonymous_tuple.AnonymousTuple([(None, fn), (None, val)]),
             computation_types.NamedTupleType((fn_type, val_type))))
+
+    if sender!=None or receiver!=None:
+      return val_decrypted.internal_representation[0]
+    else:
+      return val_decrypted.internal_representation
 
   async def _zip_val_key(self,
                          placement,
